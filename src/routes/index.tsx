@@ -1,3 +1,5 @@
+// file src/routes/index.tsx
+
 import { For } from 'solid-js';
 import { FormError } from 'solid-start';
 import {
@@ -30,6 +32,11 @@ async function sendFn(form: FormData, _event: ServerFunctionEvent) {
 
 // --- END server side ---
 
+function showClientId(messages: ReturnType<typeof useMessages>) {
+	const id = messages.id;
+	return id ? id : '???';
+}
+
 export default function Home() {
 	const messages = useMessages();
 	const [sending, send] = createServerAction$(sendFn);
@@ -44,25 +51,27 @@ export default function Home() {
 	};
 
 	return (
-		<main>
-			<h1>Chat Client: {messages.id}</h1>
-			<send.Form ref={$form} onsubmit={clearAfterSubmit}>
-				<label>Messages</label>
-				<input type="text" name="message" />
-				<button type="submit" disabled={sending.pending}>
-					Send
-				</button>
-			</send.Form>
-			<ul>
-				<For each={messages.history}>{({ body }) => <li>{body}</li>}</For>
-			</ul>
-			<p>
+		<>
+			<header>
 				Visit{' '}
 				<a href="https://start.solidjs.com" target="_blank">
 					start.solidjs.com
 				</a>{' '}
 				to learn how to build SolidStart apps.
-			</p>
-		</main>
+			</header>
+			<main>
+				<h1>Chat Client: {showClientId(messages)}</h1>
+				<send.Form ref={$form} onsubmit={clearAfterSubmit}>
+					<label>Messages</label>
+					<input type="text" name="message" />
+					<button type="submit" disabled={sending.pending}>
+						Send
+					</button>
+				</send.Form>
+				<ul>
+					<For each={messages.history}>{({ body }) => <li>{body}</li>}</For>
+				</ul>
+			</main>
+		</>
 	);
 }
