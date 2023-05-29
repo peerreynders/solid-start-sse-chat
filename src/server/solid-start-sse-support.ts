@@ -1,6 +1,7 @@
 // file: src/server/solid-start-sse-support
 import { nanoid } from 'nanoid';
 
+// WARNING: this deals with node requests
 import type http from 'node:http';
 
 // track closed requests
@@ -86,7 +87,6 @@ function requestInfo(request: Request) {
 		request.headers.get(SSE_LAST_EVENT_ID) ??
 		new URL(request.url).searchParams.get('lastEventId') ??
 		undefined;
-
 	return {
 		streamed: request.headers.has(SSE_CORRELATE)
 			? true
@@ -133,9 +133,14 @@ export type SourceController = {
 	close: () => void;
 };
 
-export type InitSource = (controller: SourceController) => () => void;
+export type InitSource = (controller: SourceController) => {
+	cleanup: () => void;
+	headers: Record<string, string> | undefined;
+};
 
 function eventStream(request: Request, init: InitSource) {
+	let otherHeaders: Record<string, string> | undefined;
+
 	const stream = new ReadableStream({
 		start(controller) {
 			const encoder = new TextEncoder();
@@ -155,7 +160,10 @@ function eventStream(request: Request, init: InitSource) {
 				controller.close();
 			};
 
-			cleanup = init({ send, close: closeConnection });
+			const result = init({ send, close: closeConnection });
+			cleanup = result.cleanup;
+			otherHeaders = result.headers;
+
 			unsubscribe = subscribe(request, (info) => {
 				if (info.source === 'request' && info.name === 'close') {
 					closeConnection();
@@ -170,9 +178,13 @@ function eventStream(request: Request, init: InitSource) {
 		},
 	});
 
-	return new Response(stream, {
-		headers: { 'Content-Type': 'text/event-stream' },
-	});
+	const baseHeaders: Record<string, string> = {
+		'Content-Type': 'text/event-stream',
+	};
+	const headers = otherHeaders
+		? Object.assign(baseHeaders, otherHeaders)
+		: baseHeaders;
+	return new Response(stream, { headers });
 }
 
 // eventSample for longpolling

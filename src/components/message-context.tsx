@@ -4,9 +4,11 @@ import { createContext, useContext, type ParentProps } from 'solid-js';
 import { isServer } from 'solid-js/web';
 import { createStore } from 'solid-js/store';
 
-import { fromJson, type ChatMessage } from '~/lib/chat';
+import { fromJson, type ChatMessage, type Welcome } from '~/lib/chat';
 
 // --- BEGIN server side ---
+
+import { parseCookie, useServerContext } from 'solid-start';
 
 import server$, {
 	ServerError,
@@ -24,26 +26,37 @@ import {
 // NOTE: call `listen()` in `entry-server.tsx`
 
 import {
+	makeInitialMessage,
 	//	sample as sampleEvents,
 	subscribe as subscribeToSource,
 } from '~/server/pub-sub';
 
 async function connectServerSource(this: ServerFunctionEvent) {
 	const info = requestInfo(this.request);
+	const cookie = parseCookie(this.request.headers.get('cookie') ?? '');
 
 	// Use `info.streamed === undefined` to force error to switch to fallback
 	if (info.streamed) {
 		let unsubscribe: (() => void) | undefined = undefined;
 
 		const init: InitSource = (controller) => {
-			unsubscribe = subscribeToSource(controller, info.lastEventId);
+			const result = subscribeToSource(controller, {
+				lastEventId: info.lastEventId,
+				cookie: cookie,
+			});
+			unsubscribe = result.unsubscribe;
 
-			return () => {
+			const cleanup = () => {
 				if (unsubscribe) {
 					unsubscribe();
 					unsubscribe = undefined;
 				}
 				console.log('source closed');
+			};
+
+			return {
+				cleanup,
+				headers: result.headers,
 			};
 		};
 
@@ -53,10 +66,33 @@ async function connectServerSource(this: ServerFunctionEvent) {
 	throw new ServerError('Unsupported Media Type', { status: 415 });
 }
 
+function serverSideLoad() {
+	const pageEvent = useServerContext();
+	const cookie = parseCookie(pageEvent.request.headers.get('cookie') ?? '');
+	const [message, headers] = makeInitialMessage(cookie);
+
+	if (headers) {
+		for (const [name, value] of Object.entries(headers))
+			pageEvent.responseHeaders.append(name, value);
+	}
+
+	return message.kind === 'welcome' ? message : undefined;
+}
+
 // --- END server side ---
 
 let currentHistory = 0;
 const historyPool: [ChatMessage[], ChatMessage[]] = [[], []];
+
+function resetHistory(messages: ChatMessage[]) {
+	const next = 1 - currentHistory;
+	const source = historyPool[currentHistory];
+	const target = historyPool[next];
+	target.splice(0, Infinity, ...messages);
+	source.length = 0;
+	currentHistory = next;
+	return target;
+}
 
 function shuntOnHistory(message?: ChatMessage[] | ChatMessage) {
 	if (!message) return historyPool[currentHistory];
@@ -76,7 +112,7 @@ function shuntOnHistory(message?: ChatMessage[] | ChatMessage) {
 
 	source.length = 0;
 	currentHistory = next;
-	return historyPool[currentHistory];
+	return target;
 }
 
 type ChatCore = {
@@ -91,12 +127,17 @@ function makeHolder() {
 	});
 	const shuntMessages = (recent: ChatMessage[] | ChatMessage) =>
 		set('history', shuntOnHistory(recent));
-	const setClientId = (id: string) => set('id', id);
+	const reset = (message: Welcome) => {
+		set({
+			id: message.id,
+			history: resetHistory(message.messages),
+		});
+	};
 
 	return {
 		context: store,
 		shuntMessages,
-		setClientId,
+		reset,
 	};
 }
 
@@ -119,11 +160,7 @@ function onMessage(event: MessageEvent<string>) {
 		}
 
 		case 'welcome': {
-			const clientId = contextHolder.context.id;
-			if (clientId) return;
-
-			contextHolder.setClientId(message.id);
-			contextHolder.shuntMessages(message.messages);
+			contextHolder.reset(message);
 			break;
 		}
 	}
@@ -156,7 +193,10 @@ function connect(basepath: string) {
 }
 
 function MessageProvider(props: ParentProps) {
-	if (!isServer) {
+	if (isServer) {
+		const message = serverSideLoad();
+		if (message) contextHolder.reset(message);
+	} else {
 		const stream = server$(connectServerSource);
 		connect(stream.url);
 	}

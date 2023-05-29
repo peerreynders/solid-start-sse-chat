@@ -1,7 +1,7 @@
 // file src/routes/index.tsx
 
 import { For } from 'solid-js';
-import { FormError } from 'solid-start';
+import { parseCookie, FormError } from 'solid-start';
 import {
 	createServerAction$,
 	type ServerFunctionEvent,
@@ -9,8 +9,9 @@ import {
 import { useMessages } from '~/components/message-context';
 
 // --- BEGIN server side ---
+import { send } from '~/server/pub-sub';
 
-async function sendFn(form: FormData, _event: ServerFunctionEvent) {
+async function sendFn(form: FormData, event: ServerFunctionEvent) {
 	const messageData = form.get('message');
 	const message = typeof messageData === 'string' ? messageData : undefined;
 
@@ -27,19 +28,22 @@ async function sendFn(form: FormData, _event: ServerFunctionEvent) {
 		throw new FormError(options.fieldErrors.message, options);
 	}
 
-	console.log('Message', message);
+	const cookie = parseCookie(event.request.headers.get('cookie') ?? '');
+	const error = send(message, cookie);
+	if (error) throw error;
 }
 
 // --- END server side ---
 
 function showClientId(messages: ReturnType<typeof useMessages>) {
 	const id = messages.id;
-	return id ? id : '???';
+	console.log('showClientId', id);
+	return typeof id === 'string' ? id : '???';
 }
 
 export default function Home() {
 	const messages = useMessages();
-	const [sending, send] = createServerAction$(sendFn);
+	const [sending, sendMessage] = createServerAction$(sendFn);
 
 	let $form: HTMLFormElement | undefined;
 	const clearFormTask = () => $form?.reset();
@@ -61,13 +65,13 @@ export default function Home() {
 			</header>
 			<main>
 				<h1>Chat Client: {showClientId(messages)}</h1>
-				<send.Form ref={$form} onsubmit={clearAfterSubmit}>
+				<sendMessage.Form ref={$form} onsubmit={clearAfterSubmit}>
 					<label>Messages</label>
 					<input type="text" name="message" />
 					<button type="submit" disabled={sending.pending}>
 						Send
 					</button>
-				</send.Form>
+				</sendMessage.Form>
 				<ul>
 					<For each={messages.history}>{({ body }) => <li>{body}</li>}</For>
 				</ul>
