@@ -2,13 +2,60 @@
 import { customAlphabet } from 'nanoid';
 import { FetchEvent } from 'solid-start/server';
 import { SourceController } from './solid-start-sse-support';
-import { makeChat, makeWelcome, type Chat, type Welcome } from '~/lib/chat';
+import {
+	makeChat,
+	makeWelcome,
+	type Chat,
+	type ChatMessage,
+	type Welcome,
+} from '~/lib/chat';
 import { isTimeValue } from '~/lib/shame';
 
 const makeClientId = customAlphabet('1234567890abcdef', 12);
 
 //const msSinceStart = () => Math.trunc(performance.now());
 const epochTimestamp = Date.now;
+
+// --- BEGIN Cache
+type MessageCache = {
+	buffer: ChatMessage[][];
+	latest: ChatMessage[];
+};
+
+const MAX_MESSAGES = 16;
+const messageCache: MessageCache = {
+	buffer: [],
+	latest: [],
+};
+
+function cacheMessage(message: ChatMessage) {
+	messageCache.latest.push(message);
+	if (messageCache.latest.length >= MAX_MESSAGES) {
+		messageCache.buffer.push(messageCache.latest);
+		messageCache.latest = [];
+	}
+}
+
+function copyHistory({ buffer, latest }: MessageCache, after = 0) {
+	const copy = [];
+	for (
+		let source = latest, k = buffer.length, j = source.length - 1, i = 0;
+		k > 0 || j >= 0;
+		i += 1, j -= 1
+	) {
+		if (j < 0) {
+			k -= 1;
+			source = buffer[k];
+			j = source.length - 1;
+		}
+		const message = source[j];
+		if (message.timestamp <= after) break;
+
+		copy[i] = message;
+	}
+
+	return copy;
+}
 
 // --- BEGIN Subscriptions
 
@@ -25,9 +72,10 @@ function makeClientIdCookie(id: string) {
 function makeInitialMessage(maybeClientId: string | undefined, lastTime = 0) {
 	const previousClient = maybeClientId && maybeClientId.length > 0;
 	const clientId = previousClient ? maybeClientId : makeClientId();
+	const messages = copyHistory(messageCache, lastTime);
 
 	if (lastTime > 0 && previousClient) {
-		const result: [Chat, undefined] = [makeChat([]), undefined];
+		const result: [Chat, undefined] = [makeChat(messages), undefined];
 
 		return result;
 	}
@@ -39,7 +87,7 @@ function makeInitialMessage(maybeClientId: string | undefined, lastTime = 0) {
 		  };
 
 	const result: [Welcome, Record<string, string> | undefined] = [
-		makeWelcome(clientId, []),
+		makeWelcome(clientId, messages),
 		headers,
 	];
 
@@ -94,8 +142,14 @@ function subscribe(
 	};
 }
 
-function send(message: string, clientId: string) {
-	console.log('send', message, clientId);
+function send(body: string, clientId: string) {
+	const message: ChatMessage = {
+		timestamp: epochTimestamp(),
+		from: clientId,
+		body,
+	};
+	cacheMessage(message);
+	console.log('send', message);
 }
 
 function fromRequestClientId(request: Request) {
