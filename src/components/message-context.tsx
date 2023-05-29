@@ -8,10 +8,9 @@ import { fromJson, type ChatMessage, type Welcome } from '~/lib/chat';
 
 // --- BEGIN server side ---
 
-import { parseCookie, useServerContext } from 'solid-start';
-
 import server$, {
 	ServerError,
+	useRequest,
 	type ServerFunctionEvent,
 } from 'solid-start/server';
 
@@ -26,14 +25,15 @@ import {
 // NOTE: call `listen()` in `entry-server.tsx`
 
 import {
+	fromFetchEventClientId,
 	makeInitialMessage,
 	//	sample as sampleEvents,
 	subscribe as subscribeToSource,
 } from '~/server/pub-sub';
 
 async function connectServerSource(this: ServerFunctionEvent) {
+	const clientId = fromFetchEventClientId(this);
 	const info = requestInfo(this.request);
-	const cookie = parseCookie(this.request.headers.get('cookie') ?? '');
 
 	// Use `info.streamed === undefined` to force error to switch to fallback
 	if (info.streamed) {
@@ -42,7 +42,7 @@ async function connectServerSource(this: ServerFunctionEvent) {
 		const init: InitSource = (controller) => {
 			const result = subscribeToSource(controller, {
 				lastEventId: info.lastEventId,
-				cookie: cookie,
+				clientId,
 			});
 			unsubscribe = result.unsubscribe;
 
@@ -67,9 +67,9 @@ async function connectServerSource(this: ServerFunctionEvent) {
 }
 
 function serverSideLoad() {
-	const pageEvent = useServerContext();
-	const cookie = parseCookie(pageEvent.request.headers.get('cookie') ?? '');
-	const [message, headers] = makeInitialMessage(cookie);
+	const pageEvent = useRequest();
+	const clientId = fromFetchEventClientId(pageEvent);
+	const [message, headers] = makeInitialMessage(clientId);
 
 	if (headers) {
 		for (const [name, value] of Object.entries(headers))

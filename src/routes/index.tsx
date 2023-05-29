@@ -1,15 +1,17 @@
 // file src/routes/index.tsx
 
 import { For } from 'solid-js';
-import { parseCookie, FormError } from 'solid-start';
-import {
-	createServerAction$,
-	type ServerFunctionEvent,
-} from 'solid-start/server';
+import { FormError } from 'solid-start';
 import { useMessages } from '~/components/message-context';
 
 // --- BEGIN server side ---
-import { send } from '~/server/pub-sub';
+import {
+	createServerAction$,
+	ServerError,
+	type ServerFunctionEvent,
+} from 'solid-start/server';
+
+import { fromFetchEventClientId, send } from '~/server/pub-sub';
 
 async function sendFn(form: FormData, event: ServerFunctionEvent) {
 	const messageData = form.get('message');
@@ -28,9 +30,10 @@ async function sendFn(form: FormData, event: ServerFunctionEvent) {
 		throw new FormError(options.fieldErrors.message, options);
 	}
 
-	const cookie = parseCookie(event.request.headers.get('cookie') ?? '');
-	const error = send(message, cookie);
-	if (error) throw error;
+	const clientId = fromFetchEventClientId(event);
+	if (!clientId) return new ServerError('Missing Client ID', { status: 400 });
+
+	send(message, clientId);
 }
 
 // --- END server side ---
