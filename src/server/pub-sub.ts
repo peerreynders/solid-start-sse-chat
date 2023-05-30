@@ -16,7 +16,6 @@ import { isTimeValue } from '~/lib/shame';
 
 const makeClientId = customAlphabet('1234567890abcdef', 12);
 
-//const msSinceStart = () => Math.trunc(performance.now());
 const epochTimestamp = Date.now;
 
 // --- BEGIN Cache
@@ -63,11 +62,12 @@ function copyHistory({ buffer, latest }: MessageCache, after = 0) {
 // --- BEGIN keep-alive
 
 const KEEP_ALIVE_MS = 15000; // 15 seconds
-let lastSend = 0;
+const msSinceStart = () => Math.trunc(performance.now());
+let lastSendMs = 0;
 let keepAliveTimeout: ReturnType<typeof setTimeout> | undefined;
 
 function keepAlive() {
-	const silence = epochTimestamp() - lastSend;
+	const silence = msSinceStart() - lastSendMs;
 	const delay =
 		silence < KEEP_ALIVE_MS ? KEEP_ALIVE_MS - silence : KEEP_ALIVE_MS;
 	keepAliveTimeout = setTimeout(keepAlive, delay);
@@ -111,7 +111,7 @@ function sendMessage(message: Message) {
 	for (const receiver of subscribers) {
 		receiver.send(json, id);
 	}
-	if (timestamp) lastSend = timestamp;
+	lastSendMs = msSinceStart();
 }
 
 const CLIENT_ID_NAME = '__client-id';

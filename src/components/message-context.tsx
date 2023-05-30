@@ -1,6 +1,12 @@
 // file: src/components/message-context
 
-import { createContext, useContext, type ParentProps } from 'solid-js';
+import {
+	createContext,
+	createEffect,
+	createSignal,
+	useContext,
+	type ParentProps,
+} from 'solid-js';
 import { isServer } from 'solid-js/web';
 import { createStore } from 'solid-js/store';
 
@@ -81,6 +87,8 @@ function serverSideLoad() {
 
 // --- END server side ---
 
+// --- BEGIN Context value
+
 let currentHistory = 0;
 const historyPool: [ChatMessage[], ChatMessage[]] = [[], []];
 
@@ -144,10 +152,61 @@ function makeHolder() {
 const contextHolder = makeHolder();
 const MessageContext = createContext(contextHolder.context);
 
+// --- BEGIN Keep alive timer
+
+const KEEP_ALIVE_MS = 20000;
+const msSinceStart = () => Math.trunc(performance.now());
+let lastMessageMs = msSinceStart();
+let keepAliveTimeout: ReturnType<typeof setTimeout> | undefined;
+let start: () => void | undefined;
+
+function keepAlive() {
+	const silence = msSinceStart() - lastMessageMs;
+	const delay =
+		silence < KEEP_ALIVE_MS ? KEEP_ALIVE_MS - silence : KEEP_ALIVE_MS;
+	if (delay < KEEP_ALIVE_MS) {
+		keepAliveTimeout = setTimeout(keepAlive, delay);
+		return;
+	}
+
+	keepAliveTimeout = undefined;
+	start?.();
+}
+
+function startKeepAlive() {
+	if (keepAliveTimeout) return;
+
+	lastMessageMs = msSinceStart();
+	keepAliveTimeout = setTimeout(keepAlive, KEEP_ALIVE_MS);
+}
+
+function stopKeepAlive() {
+	if (!keepAliveTimeout) return;
+
+	clearTimeout(keepAliveTimeout);
+	keepAliveTimeout = undefined;
+}
+
+// --- BEGIN event source
+
+function toHref(basePath: string, eventId?: string, useSse = true) {
+	const lastEvent = eventId
+		? 'lastEventId=' + encodeURIComponent(eventId)
+		: undefined;
+	const query = useSse
+		? lastEvent
+		: lastEvent
+		? SSE_FALLBACK_SEARCH_PAIR + '&' + lastEvent
+		: SSE_FALLBACK_SEARCH_PAIR;
+
+	return query ? basePath + '?' + query : basePath;
+}
+
 let lastEventId: string | undefined;
 let eventSource: EventSource | undefined;
 
 function onMessage(event: MessageEvent<string>) {
+	lastMessageMs = msSinceStart();
 	if (event.lastEventId) lastEventId = event.lastEventId;
 
 	const message = fromJson(event.data);
@@ -165,7 +224,6 @@ function onMessage(event: MessageEvent<string>) {
 		}
 
 		case 'keep-alive': {
-			console.log('keep-alive', message);
 			break;
 		}
 	}
@@ -176,25 +234,56 @@ function onError(event: Event) {
 	console.log('onError', event);
 }
 
-function toHref(basePath: string, eventId?: string, useSse = true) {
-	const lastEvent = eventId
-		? 'lastEventId=' + encodeURIComponent(eventId)
-		: undefined;
-	const query = useSse
-		? lastEvent
-		: lastEvent
-		? SSE_FALLBACK_SEARCH_PAIR + '&' + lastEvent
-		: SSE_FALLBACK_SEARCH_PAIR;
+function disconnectEventSource() {
+	if (!eventSource) return;
 
-	return query ? basePath + '?' + query : basePath;
+	stopKeepAlive();
+	eventSource.removeEventListener('message', onMessage);
+	eventSource.removeEventListener('error', onError);
+	eventSource.close();
+	eventSource = undefined;
 }
 
-function connect(basepath: string) {
+function connectEventSource(basepath: string) {
 	const href = toHref(basepath, lastEventId);
 
 	eventSource = new EventSource(href);
 	eventSource.addEventListener('error', onError);
 	eventSource.addEventListener('message', onMessage);
+	startKeepAlive();
+}
+
+// --- BEGIN Context consumer reference count
+const [refCount, setRefCount] = createSignal(0);
+const increment = (n: number) => n + 1;
+const decrement = (n: number) => (n > 0 ? n - 1 : 0);
+
+const disposeMessages = () => setRefCount(decrement);
+
+// --- BEGIN Context Provider/Hook
+
+function setupMessageConnection(basepath: string) {
+	start = () => {
+		disconnectEventSource();
+		connectEventSource(basepath);
+	};
+
+	createEffect(() => {
+		const count = refCount();
+
+		if (count < 1) {
+			disconnectEventSource();
+			lastEventId = undefined;
+			return;
+		}
+
+		if (count > 0) {
+			if (eventSource) return;
+
+			start();
+			return;
+		}
+	});
 }
 
 function MessageProvider(props: ParentProps) {
@@ -203,7 +292,7 @@ function MessageProvider(props: ParentProps) {
 		if (message) contextHolder.reset(message);
 	} else {
 		const stream = server$(connectServerSource);
-		connect(stream.url);
+		setupMessageConnection(stream.url);
 	}
 
 	return (
@@ -214,7 +303,8 @@ function MessageProvider(props: ParentProps) {
 }
 
 function useMessages() {
+	setRefCount(increment);
 	return useContext(MessageContext);
 }
 
-export { MessageProvider, useMessages };
+export { MessageProvider, disposeMessages, useMessages };

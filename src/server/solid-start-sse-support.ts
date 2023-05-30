@@ -138,6 +138,11 @@ export type InitSource = (controller: SourceController) => {
 	headers: Record<string, string> | undefined;
 };
 
+// `eventStream()` only uses the `data` and optionally the `id` field.
+// `event` and `retry` are also available but not used here.
+//
+// https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events#fields
+//
 function eventStream(request: Request, init: InitSource) {
 	let otherHeaders: Record<string, string> | undefined;
 

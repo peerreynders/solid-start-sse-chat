@@ -1,8 +1,8 @@
 // file src/routes/index.tsx
 
-import { For } from 'solid-js';
+import { onCleanup, For } from 'solid-js';
 import { FormError } from 'solid-start';
-import { useMessages } from '~/components/message-context';
+import { disposeMessages, useMessages } from '~/components/message-context';
 
 // --- BEGIN server side ---
 import {
@@ -40,12 +40,12 @@ async function sendFn(form: FormData, event: ServerFunctionEvent) {
 
 function showClientId(messages: ReturnType<typeof useMessages>) {
 	const id = messages.id;
-	console.log('showClientId', id);
 	return typeof id === 'string' ? id : '???';
 }
 
 export default function Home() {
 	const messages = useMessages();
+	onCleanup(disposeMessages);
 	const [sending, sendMessage] = createServerAction$(sendFn);
 
 	let $form: HTMLFormElement | undefined;
