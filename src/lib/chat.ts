@@ -17,7 +17,12 @@ export type Welcome = Omit<Chat, 'kind'> & {
 	id: string;
 };
 
-export type Message = Chat | Welcome;
+export type KeepAlive = {
+	kind: 'keep-alive';
+	timestamp: number;
+};
+
+export type Message = Chat | Welcome | KeepAlive;
 
 function makeChat(messages: ChatMessage[]) {
 	const message: Chat = {
@@ -26,6 +31,37 @@ function makeChat(messages: ChatMessage[]) {
 	};
 
 	return message;
+}
+
+function makeWelcome(clientId: string, messages: ChatMessage[]) {
+	const message: Welcome = {
+		kind: 'welcome',
+		id: clientId,
+		messages,
+	};
+
+	return message;
+}
+
+function makeKeepAlive(timestamp: number) {
+	const message: KeepAlive = {
+		kind: 'keep-alive',
+		timestamp,
+	};
+
+	return message;
+}
+
+function fromMessageTimestamp(message: Message) {
+	switch (message.kind) {
+		case 'chat':
+		case 'welcome':
+			return message.messages.length > 0
+				? message.messages[0].timestamp
+				: undefined;
+		case 'keep-alive':
+			return message.timestamp;
+	}
 }
 
 function isChatMessage(data: unknown): data is ChatMessage {
@@ -59,14 +95,10 @@ function isWelcome(message: Record<string, unknown>): message is Welcome {
 		: false;
 }
 
-function makeWelcome(clientId: string, messages: ChatMessage[]) {
-	const message: Welcome = {
-		kind: 'welcome',
-		id: clientId,
-		messages,
-	};
+function isKeepAlive(message: Record<string, unknown>): message is KeepAlive {
+	if (message.kind !== 'keep-alive') return false;
 
-	return message;
+	return typeof message.timestamp === 'number';
 }
 
 function isMessage(message: unknown): message is Message {
@@ -74,7 +106,8 @@ function isMessage(message: unknown): message is Message {
 
 	return (
 		isChat(message as Record<string, unknown>) ||
-		isWelcome(message as Record<string, unknown>)
+		isWelcome(message as Record<string, unknown>) ||
+		isKeepAlive(message as Record<string, unknown>)
 	);
 }
 
@@ -83,4 +116,4 @@ function fromJson(raw: string) {
 	return isMessage(message) ? message : undefined;
 }
 
-export { makeChat, makeWelcome, fromJson };
+export { fromMessageTimestamp, fromJson, makeChat, makeKeepAlive, makeWelcome };

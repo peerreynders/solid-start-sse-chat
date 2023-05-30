@@ -155,12 +155,17 @@ function onMessage(event: MessageEvent<string>) {
 
 	switch (message.kind) {
 		case 'chat': {
-			console.log('chat', message);
+			contextHolder.shuntMessages(message.messages);
 			break;
 		}
 
 		case 'welcome': {
 			contextHolder.reset(message);
+			break;
+		}
+
+		case 'keep-alive': {
+			console.log('keep-alive', message);
 			break;
 		}
 	}

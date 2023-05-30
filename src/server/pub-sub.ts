@@ -3,10 +3,13 @@ import { customAlphabet } from 'nanoid';
 import { FetchEvent } from 'solid-start/server';
 import { SourceController } from './solid-start-sse-support';
 import {
+	fromMessageTimestamp,
 	makeChat,
+	makeKeepAlive,
 	makeWelcome,
 	type Chat,
 	type ChatMessage,
+	type Message,
 	type Welcome,
 } from '~/lib/chat';
 import { isTimeValue } from '~/lib/shame';
@@ -57,10 +60,59 @@ function copyHistory({ buffer, latest }: MessageCache, after = 0) {
 	return copy;
 }
 
+// --- BEGIN keep-alive
+
+const KEEP_ALIVE_MS = 15000; // 15 seconds
+let lastSend = 0;
+let keepAliveTimeout: ReturnType<typeof setTimeout> | undefined;
+
+function keepAlive() {
+	const silence = epochTimestamp() - lastSend;
+	const delay =
+		silence < KEEP_ALIVE_MS ? KEEP_ALIVE_MS - silence : KEEP_ALIVE_MS;
+	keepAliveTimeout = setTimeout(keepAlive, delay);
+
+	if (delay < KEEP_ALIVE_MS) return;
+
+	sendMessage(makeKeepAlive(epochTimestamp()));
+}
+
+function stopKeepAlive() {
+	if (!keepAliveTimeout) return;
+
+	clearTimeout(keepAliveTimeout);
+	keepAliveTimeout = undefined;
+}
+
+function startKeepAlive() {
+	stopKeepAlive();
+	keepAliveTimeout = setTimeout(keepAlive, KEEP_ALIVE_MS);
+}
+
 // --- BEGIN Subscriptions
 
 const subscribers = new Set<SourceController>();
-//let lastSend = 0;
+
+function addSubscriber(receiver: SourceController) {
+	subscribers.add(receiver);
+	startKeepAlive();
+}
+
+function removeSubscriber(receiver: SourceController) {
+	const lastSize = subscribers.size;
+	subscribers.delete(receiver);
+	if (subscribers.size === 0 && lastSize > 0) stopKeepAlive();
+}
+
+function sendMessage(message: Message) {
+	const json = JSON.stringify(message);
+	const timestamp = fromMessageTimestamp(message);
+	const id = timestamp ? String(timestamp) : undefined;
+	for (const receiver of subscribers) {
+		receiver.send(json, id);
+	}
+	if (timestamp) lastSend = timestamp;
+}
 
 const CLIENT_ID_NAME = '__client-id';
 
@@ -115,7 +167,7 @@ function subscribe(
 		const json = JSON.stringify(message);
 		controller.send(json, messageId);
 
-		subscribers.add(receiver);
+		addSubscriber(receiver);
 		status = 1;
 	};
 
@@ -129,7 +181,7 @@ function subscribe(
 		if (!receiver) return false;
 
 		// actually unsubscribe
-		subscribers.delete(receiver);
+		removeSubscriber(receiver);
 		receiver = undefined;
 		return true;
 	};
@@ -149,8 +201,11 @@ function send(body: string, clientId: string) {
 		body,
 	};
 	cacheMessage(message);
-	console.log('send', message);
+	const chat = makeChat([message]);
+	sendMessage(chat);
 }
+
+// --- BEGIN support utilities
 
 function fromRequestClientId(request: Request) {
 	const cookie = request.headers.get('cookie');
