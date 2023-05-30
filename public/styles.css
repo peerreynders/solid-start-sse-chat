@@ -1,0 +1,208 @@
+/* Reset https://andy-bell.co.uk/a-modern-css-reset/ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body,
+h1,
+h2,
+h3,
+h4,
+p,
+figure,
+blockquote,
+dl,
+dd {
+  margin: 0;
+}
+
+ul[role='list'],
+ol[role='list'] {
+  list-style: none;
+}
+
+html:focus-within {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  text-rendering: optimizeSpeed;
+  line-height: 1.5;
+}
+
+a:not([class]) {
+  text-decoration-skip-ink: auto;
+}
+
+img,
+picture {
+  max-width: 100%;
+  display: block;
+}
+
+input,
+button,
+textarea,
+select {
+  font: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html:focus-within {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Settings */
+
+:root {
+  --size-400: 1rem;
+  --size-300: calc(var(--size-400) * 0.75);
+  --size-500: calc(var(--size-400) * 1.33);
+  --size-600: calc(var(--size-400) * 1.77);
+  --size-700: calc(var(--size-400) * 2.32);
+  --size-800: calc(var(--size-400) * 3.15);
+  --size-900: calc(var(--size-400) * 4.2);
+  --size-major: calc(var(--size-400) * 5.6);
+  --color-white: #ffffff;
+  --color-off-white: #f3f4f4;
+  --color-grey: #c4c4c4;
+  --color-grey-dark: #414042;
+  --color-blue: #4f88c6;
+  --color-primary: var(--color-blue);
+  --color-blue-dark-dark-rgb: 7 37 74;
+  --color-light: var(--color-white);
+  --color-dark: var(--color-grey-dark);
+  --color-text: var(--color-light);
+  --metric-radius: 0.5rem;
+  --generic-shadow: 0px 1px 2px rgb(60 64 67 / 0.3),
+    0px 2px 6px 2px rgb(60 64 67 / 0.15);
+  --font-sans: Gordita, ui-sans-serif, system-ui, 'Helvetica Neue', Arial,
+    san-serif;
+  --font-mono: 'Andale Mono', 'Ubuntu Mono', monospace;
+}
+
+body {
+  color: var(--color-text);
+  background: linear-gradient(
+    90deg,
+    var(--color-blue),
+    33%,
+    rgb(var(--color-blue-dark-dark-rgb) / 0.8)
+  );
+  font-family: var(--font-sans);
+}
+
+.button,
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-items: center;
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--metric-radius);
+  color: var(--color-light);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.6rem 1.5rem;
+  position: relative;
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.1ch;
+  transition: background-color 0.2s, box-shadow 0.2s;
+  overflow: hidden;
+  position: relative;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
+.button:hover,
+button:hover {
+  box-shadow: var(--generic-shadow);
+  background: var(--color-dark);
+  border: 1px solid var(--color-dark);
+}
+
+body {
+  margin-left: auto;
+  margin-right: auto;
+  height: 100vh;
+  min-height: 400px;
+  max-width: 48ch;
+  display: flex;
+  flex-direction: column;
+}
+
+body > * {
+  margin-top: var(--size-500);
+}
+
+a {
+  color: var(--color-text);
+}
+
+a:visited {
+  color: var(--color-grey);
+}
+
+.messages {
+  --label-font-size: var(--size-500);
+}
+
+.messages h1 {
+  font-size: var(--size-600);
+  color: var(--color-off-white);
+  text-align: end;
+  margin-bottom: calc(-0.8rem - var(--label-font-size));
+}
+
+.messages label {
+  font-size: var(--label-font-size);
+}
+
+.messages input {
+  padding: 0.6rem 1rem;
+  width: 100%;
+  border-radius: var(--metric-radius);
+}
+
+.messages button {
+  display: block;
+  width: 100%;
+  margin-top: var(--size-300);
+  font-size: var(--size-500);
+  font-weight: 700;
+}
+
+.messages ul {
+  padding-inline-start: 0;
+}
+
+.messages time {
+  font-family: var(--font-mono);
+  color: var(--color-off-white);
+}
+
+.messages time::after {
+  content: ' ';
+}
+
+.message__from {
+  font-family: var(--font-mono);
+  color: var(--color-grey);
+}
+
+.message__from::after {
+  content: ' ';
+}

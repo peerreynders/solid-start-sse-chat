@@ -14,7 +14,7 @@ import {
 } from '~/lib/chat';
 import { isTimeValue } from '~/lib/shame';
 
-const makeClientId = customAlphabet('1234567890abcdef', 12);
+const makeClientId = customAlphabet('1234567890abcdef', 7);
 
 const epochTimestamp = Date.now;
 

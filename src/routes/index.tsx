@@ -2,6 +2,7 @@
 
 import { onCleanup, For } from 'solid-js';
 import { FormError } from 'solid-start';
+import { formatUTCTimeOnly } from '~/lib/shame';
 import { disposeMessages, useMessages } from '~/components/message-context';
 
 // --- BEGIN server side ---
@@ -66,17 +67,30 @@ export default function Home() {
 				</a>{' '}
 				to learn how to build SolidStart apps.
 			</header>
-			<main>
-				<h1>Chat Client: {showClientId(messages)}</h1>
+			<main class="messages">
+				<h1>Client: {showClientId(messages)}</h1>
 				<sendMessage.Form ref={$form} onsubmit={clearAfterSubmit}>
-					<label>Messages</label>
-					<input type="text" name="message" />
+					<label>
+						Message:
+						<input type="text" name="message" />
+					</label>
 					<button type="submit" disabled={sending.pending}>
 						Send
 					</button>
 				</sendMessage.Form>
-				<ul>
-					<For each={messages.history}>{({ body }) => <li>{body}</li>}</For>
+				<ul role="list">
+					<For each={messages.history}>
+						{({ timestamp, from, body }) => {
+							const chatTime = formatUTCTimeOnly(timestamp);
+							return (
+								<li>
+									<time datetime={chatTime}>{chatTime}</time>
+									<span class="message__from">{from}</span>
+									{body}
+								</li>
+							);
+						}}
+					</For>
 				</ul>
 			</main>
 		</>
