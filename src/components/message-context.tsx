@@ -10,7 +10,12 @@ import {
 import { isServer } from 'solid-js/web';
 import { createStore } from 'solid-js/store';
 
-import { fromJson, type ChatMessage, type Welcome } from '~/lib/chat';
+import {
+	fromJson,
+	type ChatMessage,
+	type Message,
+	type Welcome,
+} from '~/lib/chat';
 
 // --- BEGIN server side ---
 
@@ -22,34 +27,35 @@ import server$, {
 
 import {
 	SSE_FALLBACK_SEARCH_PAIR,
-	//	eventSample,
+	eventPoll,
 	eventStream,
 	requestInfo,
-	//	type InitSample,
+	type InitPoll,
 	type InitSource,
 } from '~/server/solid-start-sse-support';
 // NOTE: call `listen()` in `entry-server.tsx`
 
 import {
 	fromFetchEventClientId,
-	makeInitialMessage,
-	//	sample as sampleEvents,
+	makeMessageWelcome,
+	longPoll,
 	subscribe as subscribeToSource,
 } from '~/server/pub-sub';
 
 async function connectServerSource(this: ServerFunctionEvent) {
 	const clientId = fromFetchEventClientId(this);
 	const info = requestInfo(this.request);
+	const args = {
+		lastEventId: info.lastEventId,
+		clientId,
+	};
 
-	// Use `info.streamed === undefined` to force error to switch to fallback
+	// Use `if(info.streamed === undefined) {` to force error to switch to fallback
 	if (info.streamed) {
 		let unsubscribe: (() => void) | undefined = undefined;
 
 		const init: InitSource = (controller) => {
-			const result = subscribeToSource(controller, {
-				lastEventId: info.lastEventId,
-				clientId,
-			});
+			const result = subscribeToSource(controller, args);
 			unsubscribe = result.unsubscribe;
 
 			const cleanup = () => {
@@ -69,13 +75,33 @@ async function connectServerSource(this: ServerFunctionEvent) {
 		return eventStream(this.request, init);
 	}
 
+	if (info.streamed === false) {
+		let close: (() => void) | undefined;
+		const init: InitPoll = (controller) => {
+			close = longPoll(controller, args);
+
+			const cleanup = () => {
+				if (close) {
+					close();
+					close = undefined;
+				}
+				console.log('poll closed');
+			};
+
+			// headers are passed via `controller.close`
+			return cleanup;
+		};
+
+		return eventPoll(this.request, init);
+	}
+
 	throw new ServerError('Unsupported Media Type', { status: 415 });
 }
 
 function serverSideLoad() {
 	const pageEvent = useRequest();
 	const clientId = fromFetchEventClientId(pageEvent);
-	const [message, headers] = makeInitialMessage(clientId);
+	const [message, headers] = makeMessageWelcome(clientId);
 
 	if (headers) {
 		for (const [name, value] of Object.entries(headers))
@@ -89,8 +115,10 @@ function serverSideLoad() {
 
 // --- BEGIN Context value
 
-let currentHistory = 0;
+const msSinceStart = () => Math.trunc(performance.now());
 const historyPool: [ChatMessage[], ChatMessage[]] = [[], []];
+let currentHistory = 0;
+let lastMessageMs = msSinceStart();
 
 function resetHistory(messages: ChatMessage[]) {
 	const next = 1 - currentHistory;
@@ -152,11 +180,32 @@ function makeHolder() {
 const contextHolder = makeHolder();
 const MessageContext = createContext(contextHolder.context);
 
+function update(message: Message) {
+	lastMessageMs = msSinceStart();
+
+	switch (message.kind) {
+		case 'chat': {
+			contextHolder.shuntMessages(message.messages);
+			console.log('chat', message.timestamp);
+			break;
+		}
+
+		case 'welcome': {
+			contextHolder.reset(message);
+			console.log('welcome', message.timestamp);
+			break;
+		}
+
+		case 'keep-alive': {
+			console.log('keep-alive', message.timestamp);
+			break;
+		}
+	}
+}
+
 // --- BEGIN Keep alive timer
 
 const KEEP_ALIVE_MS = 20000;
-const msSinceStart = () => Math.trunc(performance.now());
-let lastMessageMs = msSinceStart();
 let keepAliveTimeout: ReturnType<typeof setTimeout> | undefined;
 let start: () => void | undefined;
 
@@ -187,7 +236,22 @@ function stopKeepAlive() {
 	keepAliveTimeout = undefined;
 }
 
-// --- BEGIN event source
+// --- BEGIN general connection
+
+//  0 - No connection attempted
+//  1 - EventSource created
+//  2 - At least one message received via event source
+//  3 - Use longpoll fallback (event source had error before reaching 2)
+// -1 - Connection failed (fallback also encountered an error; perhaps
+//      identifying the reason for the event source failure)
+//
+const STATUS_IDLE = 0;
+const STATUS_WAITING = 1;
+const STATUS_MESSAGE = 2;
+const STATUS_LONG_POLL = 3;
+const STATUS_FAILED = -1;
+let connectStatus = STATUS_IDLE;
+let lastEventId: string | undefined;
 
 function toHref(basePath: string, eventId?: string, useSse = true) {
 	const lastEvent = eventId
@@ -202,7 +266,9 @@ function toHref(basePath: string, eventId?: string, useSse = true) {
 	return query ? basePath + '?' + query : basePath;
 }
 
-let lastEventId: string | undefined;
+// --- BEGIN event source
+
+const READY_STATE_CLOSED = 2;
 let eventSource: EventSource | undefined;
 
 function onMessage(event: MessageEvent<string>) {
@@ -212,26 +278,8 @@ function onMessage(event: MessageEvent<string>) {
 	const message = fromJson(event.data);
 	if (!message) return;
 
-	switch (message.kind) {
-		case 'chat': {
-			contextHolder.shuntMessages(message.messages);
-			break;
-		}
-
-		case 'welcome': {
-			contextHolder.reset(message);
-			break;
-		}
-
-		case 'keep-alive': {
-			break;
-		}
-	}
-}
-
-function onError(event: Event) {
-	// No way to identify the reason here so try long polling next
-	console.log('onError', event);
+	connectStatus = STATUS_MESSAGE;
+	update(message);
 }
 
 function disconnectEventSource() {
@@ -244,13 +292,89 @@ function disconnectEventSource() {
 	eventSource = undefined;
 }
 
+function onError(event: Event) {
+	// No way to identify the reason here so try long polling next
+	if (
+		eventSource?.readyState === READY_STATE_CLOSED &&
+		connectStatus !== STATUS_MESSAGE
+	) {
+		connectStatus = STATUS_LONG_POLL;
+		disconnectEventSource();
+		setTimeout(start);
+	}
+	console.log('onError', event);
+}
+
 function connectEventSource(basepath: string) {
 	const href = toHref(basepath, lastEventId);
 
 	eventSource = new EventSource(href);
+	connectStatus = STATUS_WAITING;
 	eventSource.addEventListener('error', onError);
 	eventSource.addEventListener('message', onMessage);
 	startKeepAlive();
+}
+
+// --- BEGIN long polling
+
+const LONG_POLL_WAIT_MS = 50; // 50 milliseconds
+let startPollTimeout: ReturnType<typeof setTimeout> | undefined;
+let abort: AbortController | undefined;
+
+function disconnectPoll() {
+	stopKeepAlive();
+
+	if (startPollTimeout) {
+		clearTimeout(startPollTimeout);
+		startPollTimeout = undefined;
+	}
+
+	if (abort) {
+		abort.abort();
+		abort = undefined;
+	}
+}
+
+function pollFailed() {
+	connectStatus = STATUS_FAILED;
+	disconnectPoll();
+}
+
+async function fetchPoll(path: string) {
+	startPollTimeout = undefined;
+	console.assert(abort === undefined, 'poll abort unexpectedly set');
+
+	let waitMs = -1;
+	try {
+		const href = toHref(path, lastEventId, false);
+		abort = new AbortController();
+
+		startKeepAlive();
+		const response = await fetch(href, { signal: abort.signal });
+		stopKeepAlive();
+
+		if (response.ok) {
+			const message = fromJson(await response.text());
+			if (message) {
+				lastEventId = String(message.timestamp);
+				update(message);
+				waitMs = LONG_POLL_WAIT_MS;
+			}
+		}
+	} catch (error) {
+		console.error('fetchSample', error);
+	} finally {
+		if (waitMs > 0) {
+			startPollTimeout = setTimeout(fetchPoll, waitMs, path);
+		} else {
+			pollFailed();
+		}
+		abort = undefined;
+	}
+}
+
+function connectPoll(path: string) {
+	startPollTimeout = setTimeout(fetchPoll, LONG_POLL_WAIT_MS, path);
 }
 
 // --- BEGIN Context consumer reference count
@@ -262,23 +386,38 @@ const disposeMessages = () => setRefCount(decrement);
 
 // --- BEGIN Context Provider/Hook
 
+const isActive = () => Boolean(eventSource || abort || startPollTimeout);
+
+function disconnect() {
+	if (eventSource) disconnectEventSource();
+	else disconnectPoll();
+}
+
+function connect(basepath: string) {
+	if (refCount() < 1) return;
+
+	if (connectStatus !== STATUS_LONG_POLL) connectEventSource(basepath);
+	else connectPoll(basepath);
+}
+
 function setupMessageConnection(basepath: string) {
 	start = () => {
-		disconnectEventSource();
-		connectEventSource(basepath);
+		disconnect();
+		connect(basepath);
 	};
 
 	createEffect(() => {
 		const count = refCount();
 
 		if (count < 1) {
-			disconnectEventSource();
-			lastEventId = undefined;
+			if (isActive()) {
+				disconnect();
+			}
 			return;
 		}
 
 		if (count > 0) {
-			if (eventSource) return;
+			if (isActive()) return;
 
 			start();
 			return;

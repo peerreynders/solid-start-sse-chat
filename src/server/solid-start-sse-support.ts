@@ -97,6 +97,11 @@ function requestInfo(request: Request) {
 	};
 }
 
+const combineHeaders = (
+	base: Record<string, string>,
+	others?: Record<string, string>
+) => (others ? Object.assign(base, others) : base);
+
 let receive: (event: MessageEvent<EventInfo>) => void | undefined;
 let listening = false;
 
@@ -183,27 +188,28 @@ function eventStream(request: Request, init: InitSource) {
 		},
 	});
 
-	const baseHeaders: Record<string, string> = {
-		'Content-Type': 'text/event-stream',
-	};
-	const headers = otherHeaders
-		? Object.assign(baseHeaders, otherHeaders)
-		: baseHeaders;
-	return new Response(stream, { headers });
+	return new Response(stream, {
+		headers: combineHeaders(
+			{ 'Content-Type': 'text/event-stream' },
+			otherHeaders
+		),
+	});
 }
 
-// eventSample for longpolling
+// eventSample for long polling
 
-export type SampleController = {
-	close: (data: string) => void;
+export type PollController = {
+	close: (data: string, otherHeaders?: Record<string, string>) => void;
 	cancel: () => void;
 };
 
-export type InitSample = (controller: SampleController) => () => void;
+export type InitPoll = (controller: PollController) => () => void;
 
-function eventSample(request: Request, init: InitSample) {
+function eventPoll(request: Request, init: InitPoll) {
 	return new Promise<Response>((resolve) => {
+		// pub-sub cleanup
 		let cleanup: (() => void) | undefined;
+		// request close subscription
 		let unsubscribe: (() => boolean) | undefined = undefined;
 
 		const closeConnection = (response?: Response) => {
@@ -212,7 +218,6 @@ function eventSample(request: Request, init: InitSample) {
 			cleanup();
 			cleanup = undefined;
 			unsubscribe?.();
-
 			resolve(
 				response
 					? response
@@ -223,26 +228,34 @@ function eventSample(request: Request, init: InitSample) {
 			);
 		};
 
-		const close = (json: string) =>
+		const cancel = () => closeConnection();
+		const close = (
+			json: string,
+			otherHeaders: Record<string, string> | undefined
+		) => {
 			closeConnection(
 				new Response(json, {
-					headers: {
-						'Content-Type': 'application/json',
-					},
+					headers: combineHeaders(
+						{ 'Content-Type': 'application/json' },
+						otherHeaders
+					),
 				})
 			);
+		};
+		// pub-sub side cleanup
+		cleanup = init({ close, cancel });
 
-		cleanup = init({ close, cancel: () => closeConnection() });
-
+		// subscribe to request closing
 		unsubscribe = subscribe(request, (info) => {
 			if (info.source === 'request' && info.name === 'close') {
-				closeConnection();
+				cancel();
 				return;
 			}
 		});
 
+		// If request was already closed send an empty response
 		if (!unsubscribe) {
-			closeConnection();
+			cancel();
 			return;
 		}
 	});
@@ -307,7 +320,7 @@ if (globalThis.__no_tree_shaking) {
 
 export {
 	SSE_FALLBACK_SEARCH_PAIR,
-	eventSample,
+	eventPoll,
 	eventStream,
 	listen,
 	requestInfo,

@@ -9,6 +9,7 @@ export type ChatMessage = {
 
 export type Chat = {
 	kind: 'chat';
+	timestamp: number;
 	messages: ChatMessage[];
 };
 
@@ -24,18 +25,24 @@ export type KeepAlive = {
 
 export type Message = Chat | Welcome | KeepAlive;
 
-function makeChat(messages: ChatMessage[]) {
+function makeChat(messages: ChatMessage[], timestamp: number) {
 	const message: Chat = {
 		kind: 'chat',
+		timestamp,
 		messages,
 	};
 
 	return message;
 }
 
-function makeWelcome(clientId: string, messages: ChatMessage[]) {
+function makeWelcome(
+	clientId: string,
+	messages: ChatMessage[],
+	timestamp: number
+) {
 	const message: Welcome = {
 		kind: 'welcome',
+		timestamp,
 		id: clientId,
 		messages,
 	};
@@ -50,18 +57,6 @@ function makeKeepAlive(timestamp: number) {
 	};
 
 	return message;
-}
-
-function fromMessageTimestamp(message: Message) {
-	switch (message.kind) {
-		case 'chat':
-		case 'welcome':
-			return message.messages.length > 0
-				? message.messages[0].timestamp
-				: undefined;
-		case 'keep-alive':
-			return message.timestamp;
-	}
 }
 
 function isChatMessage(data: unknown): data is ChatMessage {
@@ -80,6 +75,8 @@ function isChatMessage(data: unknown): data is ChatMessage {
 function isChat(message: Record<string, unknown>): message is Chat {
 	if (message.kind !== 'chat') return false;
 
+	if (!isTimeValue(message.timestamp)) return false;
+
 	return Array.isArray(message.messages)
 		? message.messages.every(isChatMessage)
 		: false;
@@ -87,6 +84,8 @@ function isChat(message: Record<string, unknown>): message is Chat {
 
 function isWelcome(message: Record<string, unknown>): message is Welcome {
 	if (message.kind !== 'welcome') return false;
+
+	if (!isTimeValue(message.timestamp)) return false;
 
 	if (typeof message.id !== 'string') return false;
 
@@ -98,7 +97,7 @@ function isWelcome(message: Record<string, unknown>): message is Welcome {
 function isKeepAlive(message: Record<string, unknown>): message is KeepAlive {
 	if (message.kind !== 'keep-alive') return false;
 
-	return typeof message.timestamp === 'number';
+	return isTimeValue(message.timestamp);
 }
 
 function isMessage(message: unknown): message is Message {
@@ -116,4 +115,4 @@ function fromJson(raw: string) {
 	return isMessage(message) ? message : undefined;
 }
 
-export { fromMessageTimestamp, fromJson, makeChat, makeKeepAlive, makeWelcome };
+export { fromJson, makeChat, makeKeepAlive, makeWelcome };
