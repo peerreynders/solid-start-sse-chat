@@ -17,6 +17,8 @@ import {
 	type Welcome,
 } from '~/lib/chat';
 
+// import { scheduleCompare } from '~/lib/row-monitor';
+
 // --- BEGIN server side ---
 
 import server$, {
@@ -186,12 +188,14 @@ function update(message: Message) {
 	switch (message.kind) {
 		case 'chat': {
 			contextHolder.shuntMessages(message.messages);
+			// scheduleCompare();
 			console.log('chat', message.timestamp);
 			break;
 		}
 
 		case 'welcome': {
 			contextHolder.reset(message);
+			// scheduleCompare();
 			console.log('welcome', message.timestamp);
 			break;
 		}
