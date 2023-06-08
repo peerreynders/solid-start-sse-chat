@@ -38,8 +38,8 @@ function cacheMessage(message: ChatMessage) {
 	}
 }
 
-function copyHistory({ buffer, latest }: MessageCache, after = 0) {
-	const copy = [];
+function forCached(fn: (message: ChatMessage, i: number) => boolean) {
+	const { buffer, latest } = messageCache;
 	for (
 		let source = latest, k = buffer.length, j = source.length - 1, i = 0;
 		k > 0 || j >= 0;
@@ -50,13 +50,30 @@ function copyHistory({ buffer, latest }: MessageCache, after = 0) {
 			source = buffer[k];
 			j = source.length - 1;
 		}
-		const message = source[j];
-		if (message.timestamp <= after) break;
+		if(!fn(source[j], i)) break;
+	}
+}
+
+function copyHistory(after = 0) {
+	const copy: ChatMessage[] = [];
+	forCached((message, i) => {
+		if (message.timestamp <= after) return false;
 
 		copy[i] = message;
-	}
-
+		return true; 
+	});
 	return copy;
+}
+
+function sizeHistory(after: number) {
+	let size = 0;
+	forCached((message) => {
+    if(message.timestamp <= after) return false;
+
+		size += 1;
+		return true;  
+	});
+	return size;
 }
 
 // --- BEGIN keep-alive
@@ -130,7 +147,7 @@ function makeMessageWelcome(maybeClientId: string | undefined) {
 			  }
 			: undefined;
 
-	const messages = copyHistory(messageCache);
+	const messages = copyHistory();
 	const timestamp =
 		messages.length > 0 ? messages[0].timestamp : epochTimestamp();
 	const tuple: [Welcome, Record<string, string> | undefined] = [
@@ -141,7 +158,7 @@ function makeMessageWelcome(maybeClientId: string | undefined) {
 }
 
 function makeMessageChat(lastTime: number) {
-	const messages = copyHistory(messageCache, lastTime);
+	const messages = copyHistory(lastTime);
 	const timestamp =
 		messages.length > 0 ? messages[0].timestamp : epochTimestamp();
 	return makeChat(messages, timestamp);
@@ -291,8 +308,6 @@ function markMessagePolls(message: Chat) {
 	schedulePollSweep();
 }
 
-const noOp = () => void 0;
-
 function longPoll(
 	controller: PollController,
 	args: { lastEventId: string | undefined; clientId: string | undefined }
@@ -300,9 +315,9 @@ function longPoll(
 	const lastTime = timeFromLastEventId(args.lastEventId);
 	if (lastTime === 0 || !args.clientId) {
 		const [message, headers] = makeMessageWelcome(args.clientId);
-		queueMicrotask(() => controller.close(JSON.stringify(message), headers));
+		controller.close(JSON.stringify(message), headers);
 
-		return noOp;
+		return undefined;
 	}
 
 	const poll: MessagePoll = {
@@ -311,7 +326,7 @@ function longPoll(
 		clientId: args.clientId,
 		lastTime,
 		arrived: msSinceStart(),
-		messages: 0,
+		messages: sizeHistory(lastTime),
 	};
 
 	const unregister = () => {

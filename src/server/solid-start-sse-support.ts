@@ -143,6 +143,8 @@ export type InitSource = (controller: SourceController) => {
 	headers: Record<string, string> | undefined;
 };
 
+const noOp = () => void 0;
+
 // `eventStream()` only uses the `data` and optionally the `id` field.
 // `event` and `retry` are also available but not used here.
 //
@@ -159,11 +161,12 @@ function eventStream(request: Request, init: InitSource) {
 				controller.enqueue(encoder.encode(payload));
 			};
 
-			let cleanup: (() => void) | undefined;
+			let cleanup: (() => void) | undefined = noOp;
 			let unsubscribe: (() => boolean) | undefined = undefined;
 
 			const closeConnection = () => {
 				if (!cleanup) return;
+
 				cleanup();
 				cleanup = undefined;
 				unsubscribe?.();
@@ -203,12 +206,12 @@ export type PollController = {
 	cancel: () => void;
 };
 
-export type InitPoll = (controller: PollController) => () => void;
+export type InitPoll = (controller: PollController) => undefined | (() => void);
 
 function eventPoll(request: Request, init: InitPoll) {
 	return new Promise<Response>((resolve) => {
 		// pub-sub cleanup
-		let cleanup: (() => void) | undefined;
+		let cleanup: (() => void) | undefined = noOp;
 		// request close subscription
 		let unsubscribe: (() => boolean) | undefined = undefined;
 
@@ -242,8 +245,12 @@ function eventPoll(request: Request, init: InitPoll) {
 				})
 			);
 		};
+
 		// pub-sub side cleanup
 		cleanup = init({ close, cancel });
+		
+		// Response already resolved
+		if(!cleanup) return;
 
 		// subscribe to request closing
 		unsubscribe = subscribe(request, (info) => {

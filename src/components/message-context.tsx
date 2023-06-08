@@ -78,9 +78,12 @@ async function connectServerSource(this: ServerFunctionEvent) {
 	}
 
 	if (info.streamed === false) {
-		let close: (() => void) | undefined;
 		const init: InitPoll = (controller) => {
-			close = longPoll(controller, args);
+			let close = longPoll(controller, args);
+			if (!close) {
+				console.log('poll closed');
+			  return undefined;
+			}
 
 			const cleanup = () => {
 				if (close) {
@@ -322,8 +325,10 @@ function connectEventSource(basepath: string) {
 // --- BEGIN long polling
 
 const LONG_POLL_WAIT_MS = 50; // 50 milliseconds
+const BACKOFF_MS = 10000;
 let startPollTimeout: ReturnType<typeof setTimeout> | undefined;
 let abort: AbortController | undefined;
+let aborted = 0;
 
 function disconnectPoll() {
 	stopKeepAlive();
@@ -346,7 +351,7 @@ function pollFailed() {
 
 async function fetchPoll(path: string) {
 	startPollTimeout = undefined;
-	console.assert(abort === undefined, 'poll abort unexpectedly set');
+	console.assert(abort === undefined, 'poll abort unexpectedly set (fetchPoll)');
 
 	let waitMs = -1;
 	try {
@@ -365,20 +370,36 @@ async function fetchPoll(path: string) {
 				waitMs = LONG_POLL_WAIT_MS;
 			}
 		}
+		aborted = 0;
+
 	} catch (error) {
-		console.error('fetchSample', error);
+	  if (error instanceof DOMException && error.name === 'AbortError') {
+		  // Aborted by disconnectPoll() (via keepAlive)
+			aborted += 1;
+		  waitMs = 0;
+		} else {
+		  console.error('fetchPoll', error instanceof Error ? error.name : error);
+		}
 	} finally {
 		if (waitMs > 0) {
 			startPollTimeout = setTimeout(fetchPoll, waitMs, path);
-		} else {
+		} if (waitMs < 0) {
 			pollFailed();
 		}
 		abort = undefined;
 	}
 }
 
+function nextPollConnect(count: number) {
+  if (count < 1) 
+	  return LONG_POLL_WAIT_MS;
+
+	return BACKOFF_MS; 
+}
+
 function connectPoll(path: string) {
-	startPollTimeout = setTimeout(fetchPoll, LONG_POLL_WAIT_MS, path);
+	console.assert(abort === undefined, 'poll abort unexpectedly set (connectPoll)');
+	startPollTimeout = setTimeout(fetchPoll, nextPollConnect(aborted), path);
 }
 
 // --- BEGIN Context consumer reference count
