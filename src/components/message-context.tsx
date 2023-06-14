@@ -82,7 +82,7 @@ async function connectServerSource(this: ServerFunctionEvent) {
 			let close = longPoll(controller, args);
 			if (!close) {
 				console.log('poll closed');
-			  return undefined;
+				return undefined;
 			}
 
 			const cleanup = () => {
@@ -351,7 +351,10 @@ function pollFailed() {
 
 async function fetchPoll(path: string) {
 	startPollTimeout = undefined;
-	console.assert(abort === undefined, 'poll abort unexpectedly set (fetchPoll)');
+	console.assert(
+		abort === undefined,
+		'poll abort unexpectedly set (fetchPoll)'
+	);
 
 	let waitMs = -1;
 	try {
@@ -371,19 +374,19 @@ async function fetchPoll(path: string) {
 			}
 		}
 		aborted = 0;
-
 	} catch (error) {
-	  if (error instanceof DOMException && error.name === 'AbortError') {
-		  // Aborted by disconnectPoll() (via keepAlive)
+		if (error instanceof DOMException && error.name === 'AbortError') {
+			// Aborted by disconnectPoll() (via keepAlive)
 			aborted += 1;
-		  waitMs = 0;
+			waitMs = 0;
 		} else {
-		  console.error('fetchPoll', error instanceof Error ? error.name : error);
+			console.error('fetchPoll', error instanceof Error ? error.name : error);
 		}
 	} finally {
 		if (waitMs > 0) {
 			startPollTimeout = setTimeout(fetchPoll, waitMs, path);
-		} if (waitMs < 0) {
+		}
+		if (waitMs < 0) {
 			pollFailed();
 		}
 		abort = undefined;
@@ -391,14 +394,16 @@ async function fetchPoll(path: string) {
 }
 
 function nextPollConnect(count: number) {
-  if (count < 1) 
-	  return LONG_POLL_WAIT_MS;
+	if (count < 1) return LONG_POLL_WAIT_MS;
 
-	return BACKOFF_MS; 
+	return BACKOFF_MS;
 }
 
 function connectPoll(path: string) {
-	console.assert(abort === undefined, 'poll abort unexpectedly set (connectPoll)');
+	console.assert(
+		abort === undefined,
+		'poll abort unexpectedly set (connectPoll)'
+	);
 	startPollTimeout = setTimeout(fetchPoll, nextPollConnect(aborted), path);
 }
 

@@ -248,9 +248,9 @@ function eventPoll(request: Request, init: InitPoll) {
 
 		// pub-sub side cleanup
 		cleanup = init({ close, cancel });
-		
+
 		// Response already resolved
-		if(!cleanup) return;
+		if (!cleanup) return;
 
 		// subscribe to request closing
 		unsubscribe = subscribe(request, (info) => {

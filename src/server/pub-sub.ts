@@ -14,97 +14,26 @@ import {
 } from '~/lib/chat';
 import { isTimeValue } from '~/lib/shame';
 
+import { MessageCache } from './message-cache';
+import { IdleAction } from './idle-action';
+
 const makeClientId = customAlphabet('1234567890abcdef', 7);
 
 const epochTimestamp = Date.now;
-
-// --- BEGIN Cache
-type MessageCache = {
-	buffer: ChatMessage[][];
-	latest: ChatMessage[];
-};
-
-const MAX_MESSAGES = 16;
-const messageCache: MessageCache = {
-	buffer: [],
-	latest: [],
-};
-
-function cacheMessage(message: ChatMessage) {
-	messageCache.latest.push(message);
-	if (messageCache.latest.length >= MAX_MESSAGES) {
-		messageCache.buffer.push(messageCache.latest);
-		messageCache.latest = [];
-	}
-}
-
-function forCached(fn: (message: ChatMessage, i: number) => boolean) {
-	const { buffer, latest } = messageCache;
-	for (
-		let source = latest, k = buffer.length, j = source.length - 1, i = 0;
-		k > 0 || j >= 0;
-		i += 1, j -= 1
-	) {
-		if (j < 0) {
-			k -= 1;
-			source = buffer[k];
-			j = source.length - 1;
-		}
-		if(!fn(source[j], i)) break;
-	}
-}
-
-function copyHistory(after = 0) {
-	const copy: ChatMessage[] = [];
-	forCached((message, i) => {
-		if (message.timestamp <= after) return false;
-
-		copy[i] = message;
-		return true; 
-	});
-	return copy;
-}
-
-function sizeHistory(after: number) {
-	let size = 0;
-	forCached((message) => {
-    if(message.timestamp <= after) return false;
-
-		size += 1;
-		return true;  
-	});
-	return size;
-}
+const messageCache = new MessageCache();
 
 // --- BEGIN keep-alive
 
 const KEEP_ALIVE_MS = 15000; // 15 seconds
 const msSinceStart = () => Math.trunc(performance.now());
-let lastSendMs = 0;
-let keepAliveTimeout: ReturnType<typeof setTimeout> | undefined;
 
-function keepAlive() {
-	const silence = msSinceStart() - lastSendMs;
-	const delay =
-		silence < KEEP_ALIVE_MS ? KEEP_ALIVE_MS - silence : KEEP_ALIVE_MS;
-	keepAliveTimeout = setTimeout(keepAlive, delay);
-
-	if (delay < KEEP_ALIVE_MS) return;
-
-	sendMessage(makeKeepAlive(epochTimestamp()));
-}
-
-function stopKeepAlive() {
-	if (!keepAliveTimeout) return;
-
-	clearTimeout(keepAliveTimeout);
-	keepAliveTimeout = undefined;
-}
-
-function startKeepAlive() {
-	stopKeepAlive();
-	keepAliveTimeout = setTimeout(keepAlive, KEEP_ALIVE_MS);
-}
+const idleAction = new IdleAction({
+	maxIdleMs: KEEP_ALIVE_MS,
+	timeMs: msSinceStart,
+	setTimer: (fn, delay) => setTimeout(fn, delay),
+	clearTimer: (id) => clearTimeout(id),
+	idleAction: () => sendMessage(makeKeepAlive(epochTimestamp())),
+});
 
 // --- BEGIN Subscriptions
 
@@ -112,13 +41,13 @@ const subscribers = new Set<SourceController>();
 
 function addSubscriber(receiver: SourceController) {
 	subscribers.add(receiver);
-	startKeepAlive();
+	idleAction.start();
 }
 
 function removeSubscriber(receiver: SourceController) {
 	const lastSize = subscribers.size;
 	subscribers.delete(receiver);
-	if (subscribers.size === 0 && lastSize > 0) stopKeepAlive();
+	if (subscribers.size === 0 && lastSize > 0) idleAction.stop();
 }
 
 function sendMessage(message: Message) {
@@ -127,7 +56,7 @@ function sendMessage(message: Message) {
 	for (const receiver of subscribers) {
 		receiver.send(json, id);
 	}
-	lastSendMs = msSinceStart();
+	idleAction.markAction();
 }
 
 const CLIENT_ID_NAME = '__client-id';
@@ -147,7 +76,7 @@ function makeMessageWelcome(maybeClientId: string | undefined) {
 			  }
 			: undefined;
 
-	const messages = copyHistory();
+	const messages = messageCache.sliceAfter();
 	const timestamp =
 		messages.length > 0 ? messages[0].timestamp : epochTimestamp();
 	const tuple: [Welcome, Record<string, string> | undefined] = [
@@ -158,7 +87,7 @@ function makeMessageWelcome(maybeClientId: string | undefined) {
 }
 
 function makeMessageChat(lastTime: number) {
-	const messages = copyHistory(lastTime);
+	const messages = messageCache.sliceAfter(lastTime);
 	const timestamp =
 		messages.length > 0 ? messages[0].timestamp : epochTimestamp();
 	return makeChat(messages, timestamp);
@@ -326,7 +255,7 @@ function longPoll(
 		clientId: args.clientId,
 		lastTime,
 		arrived: msSinceStart(),
-		messages: sizeHistory(lastTime),
+		messages: messageCache.sizeAfter(lastTime),
 	};
 
 	const unregister = () => {
@@ -348,7 +277,7 @@ function send(body: string, clientId: string) {
 		from: clientId,
 		body,
 	};
-	cacheMessage(message);
+	messageCache.cache(message);
 	const chat = makeChat([message], message.timestamp);
 	sendMessage(chat);
 	markMessagePolls(chat);
