@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "solid-start dev",
     "build": "solid-start build",
-    "start": "solid-start start",
+    "postbuild": "sed -i 's/assets_handler).use(comp/assets_handler).use(solidStartSseSupport).use(comp/g' dist/server.js",
+		"start": "solid-start start",
     "lint:types": "./node_modules/.bin/tsc --noEmit",
     "lint:es": "eslint ./src",
     "format": "prettier --write ./src"

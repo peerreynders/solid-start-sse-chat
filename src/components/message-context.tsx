@@ -52,7 +52,7 @@ async function connectServerSource(this: ServerFunctionEvent) {
 		clientId,
 	};
 
-	// Use `if(info.streamed === undefined) {` to force error to switch to fallback
+	// Use `if(info.streamed === undefined) {` to force error to switch to long polling fallback
 	if (info.streamed) {
 		let unsubscribe: (() => void) | undefined = undefined;
 
