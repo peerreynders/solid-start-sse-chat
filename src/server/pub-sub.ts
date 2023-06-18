@@ -8,7 +8,6 @@ import {
 	makeWelcome,
 	type Chat,
 	type ChatMessage,
-	type KeepAlive,
 	type Message,
 	type Welcome,
 } from '~/lib/chat';
@@ -16,6 +15,7 @@ import { isTimeValue } from '~/lib/shame';
 
 import { MessageCache } from './message-cache';
 import { IdleAction } from './idle-action';
+import { Longpoller } from './longpoller';
 
 const makeClientId = customAlphabet('1234567890abcdef', 7);
 
@@ -152,121 +152,26 @@ function subscribe(
 
 // --- BEGIN Long polling
 
-type MessagePoll = {
-	cancel: PollController['cancel'];
-	close: PollController['close'];
-	clientId: string;
-	lastTime: number;
-	arrived: number;
-	messages: number;
-};
-
-const MIN_POLL_MS = 2000; // 2 seconds
-const messagePolls = new Set<MessagePoll>();
-let pollSweepTimeout: ReturnType<typeof setTimeout> | undefined;
-let nextPollSweep = 0;
-
-function stopPollSweep() {
-	if (!pollSweepTimeout) return;
-
-	clearTimeout(pollSweepTimeout);
-	pollSweepTimeout = undefined;
-	nextPollSweep = 0;
-}
-
-function schedulePollSweep() {
-	if (messagePolls.size < 1) return stopPollSweep();
-
-	const head = messagePolls.values().next().value as MessagePoll;
-	const respondBy =
-		head.arrived + (head.messages < 1 ? KEEP_ALIVE_MS : MIN_POLL_MS);
-	const now = msSinceStart();
-
-	if (now < respondBy && nextPollSweep === respondBy) return;
-
-	if (pollSweepTimeout) clearTimeout(pollSweepTimeout);
-
-	nextPollSweep = respondBy;
-	pollSweepTimeout = setTimeout(releasePolls, nextPollSweep - now);
-}
-
-const sendPoll = (poll: MessagePoll, message: Message) =>
-	poll.close(JSON.stringify(message));
-
-function releasePolls() {
-	pollSweepTimeout = undefined;
-	nextPollSweep = 0;
-
-	const now = msSinceStart();
-	let keepAlive: KeepAlive | undefined;
-	for (const poll of messagePolls) {
-		if (
-			now < poll.arrived + MIN_POLL_MS ||
-			(now < poll.arrived + KEEP_ALIVE_MS && poll.messages < 1)
-		)
-			break;
-
-		messagePolls.delete(poll);
-		const message =
-			poll.messages === 0
-				? keepAlive
-					? keepAlive
-					: (keepAlive = makeKeepAlive(epochTimestamp()))
-				: makeMessageChat(poll.lastTime);
-		sendPoll(poll, message);
-	}
-
-	schedulePollSweep();
-}
-
-function markMessagePolls(message: Chat) {
-	const now = msSinceStart();
-	for (const poll of messagePolls) {
-		poll.messages += 1;
-		if (now <= poll.arrived + MIN_POLL_MS) continue;
-
-		messagePolls.delete(poll);
-		if (poll.messages === 1) {
-			sendPoll(poll, message);
-			continue;
-		}
-
-		sendPoll(poll, makeMessageChat(poll.lastTime));
-	}
-
-	schedulePollSweep();
-}
+const longpoller = new Longpoller<ReturnType<typeof setTimeout>>({
+	makeChat: (lastTime) => JSON.stringify(makeMessageChat(lastTime)),
+	makeKeepAlive: () => JSON.stringify(makeKeepAlive(epochTimestamp())),
+	makeWelcome: (clientId) => {
+		const [welcome, headers] = makeMessageWelcome(clientId);
+		return [JSON.stringify(welcome), headers];
+	},
+	minMs: 2000, // 2 secs
+	maxMs: KEEP_ALIVE_MS,
+	timeMs: msSinceStart,
+	setTimer: (fn, delay, arg) => setTimeout(fn, delay, arg),
+	clearTimer: (id) => clearTimeout(id),
+});
 
 function longPoll(
 	controller: PollController,
 	args: { lastEventId: string | undefined; clientId: string | undefined }
 ) {
 	const lastTime = timeFromLastEventId(args.lastEventId);
-	if (lastTime === 0 || !args.clientId) {
-		const [message, headers] = makeMessageWelcome(args.clientId);
-		controller.close(JSON.stringify(message), headers);
-
-		return undefined;
-	}
-
-	const poll: MessagePoll = {
-		close: controller.close,
-		cancel: controller.cancel,
-		clientId: args.clientId,
-		lastTime,
-		arrived: msSinceStart(),
-		messages: messageCache.sizeAfter(lastTime),
-	};
-
-	const unregister = () => {
-		messagePolls.delete(poll);
-		schedulePollSweep();
-	};
-
-	messagePolls.add(poll);
-	schedulePollSweep();
-
-	return unregister;
+	return longpoller.add(controller.close, args.clientId, lastTime);
 }
 
 // --- BEGIN Message dispatch
@@ -280,7 +185,7 @@ function send(body: string, clientId: string) {
 	messageCache.cache(message);
 	const chat = makeChat([message], message.timestamp);
 	sendMessage(chat);
-	markMessagePolls(chat);
+	longpoller.markMessage();
 }
 
 // --- BEGIN support utilities
