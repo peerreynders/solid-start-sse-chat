@@ -6,15 +6,14 @@ import {
 	makeChat,
 	makeKeepAlive,
 	makeWelcome,
-	type Chat,
 	type ChatMessage,
-	type Message,
 	type Welcome,
 } from '~/lib/chat';
 import { isTimeValue } from '~/lib/shame';
 
 import { MessageCache } from './message-cache';
 import { IdleAction } from './idle-action';
+import { Streamer, STREAMER_CHANGE } from './streamer';
 import { Longpoller } from './longpoller';
 
 const makeClientId = customAlphabet('1234567890abcdef', 7);
@@ -27,136 +26,120 @@ const messageCache = new MessageCache();
 const KEEP_ALIVE_MS = 15000; // 15 seconds
 const msSinceStart = () => Math.trunc(performance.now());
 
+const messageId = (timestamp: number) => String(timestamp);
+
+const makeKeepAliveJson = (timestamp: number) =>
+	JSON.stringify(makeKeepAlive(timestamp));
+
+const makeKeepAliveNowJson = () => makeKeepAliveJson(epochTimestamp());
+
+function dispatchKeepAlive() {
+	const timestamp = epochTimestamp();
+	streamer.send(makeKeepAliveJson(timestamp), messageId(timestamp));
+}
+
 const idleAction = new IdleAction({
 	maxIdleMs: KEEP_ALIVE_MS,
 	timeMs: msSinceStart,
 	setTimer: (fn, delay) => setTimeout(fn, delay),
 	clearTimer: (id) => clearTimeout(id),
-	idleAction: () => sendMessage(makeKeepAlive(epochTimestamp())),
+	idleAction: dispatchKeepAlive,
 });
 
 // --- BEGIN Subscriptions
 
-const subscribers = new Set<SourceController>();
-
-function addSubscriber(receiver: SourceController) {
-	subscribers.add(receiver);
-	idleAction.start();
-}
-
-function removeSubscriber(receiver: SourceController) {
-	const lastSize = subscribers.size;
-	subscribers.delete(receiver);
-	if (subscribers.size === 0 && lastSize > 0) idleAction.stop();
-}
-
-function sendMessage(message: Message) {
-	const json = JSON.stringify(message);
-	const id = String(message.timestamp);
-	for (const receiver of subscribers) {
-		receiver.send(json, id);
-	}
-	idleAction.markAction();
-}
-
 const CLIENT_ID_NAME = '__client-id';
 
-function makeClientIdCookie(id: string) {
-	// Do not specify max-age or expires to create session cookie
-	return `${CLIENT_ID_NAME}=${id}; HttpOnly; Path=/ ; SameSite=Lax`;
-}
-
-function makeMessageWelcome(maybeClientId: string | undefined) {
-	const clientId =
-		maybeClientId && maybeClientId.length > 0 ? maybeClientId : makeClientId();
-	const headers =
-		clientId !== maybeClientId
-			? {
-					'set-cookie': makeClientIdCookie(clientId),
-			  }
-			: undefined;
-
-	const messages = messageCache.sliceAfter();
-	const timestamp =
-		messages.length > 0 ? messages[0].timestamp : epochTimestamp();
-	const tuple: [Welcome, Record<string, string> | undefined] = [
-		makeWelcome(clientId, messages, timestamp),
-		headers,
+function newClientIdHeaders() {
+	const clientId = makeClientId();
+	const result: [string, Record<string, string>] = [
+		clientId,
+		{
+			'set-cookie': `${CLIENT_ID_NAME}=${clientId}; HttpOnly; Path=/ ; SameSite=Lax`,
+		},
 	];
-	return tuple;
+	return result;
 }
 
-function makeMessageChat(lastTime: number) {
-	const messages = messageCache.sliceAfter(lastTime);
-	const timestamp =
-		messages.length > 0 ? messages[0].timestamp : epochTimestamp();
-	return makeChat(messages, timestamp);
-}
-
-const makeInitialMessage = (maybeClientId: string | undefined, lastTime = 0) =>
-	lastTime < 1 || !maybeClientId
-		? makeMessageWelcome(maybeClientId)
-		: ([makeMessageChat(lastTime), undefined] as [Chat, undefined]);
+const messageTimestamp = (messages: ChatMessage[]) =>
+	messages.length > 0 ? messages[0].timestamp : epochTimestamp();
 
 function timeFromLastEventId(lastEventId: string | undefined) {
 	const lastId = Number(lastEventId);
 	return Number.isNaN(lastId) || !isTimeValue(lastId) ? 0 : lastId;
 }
 
-function subscribe(
+function makeMessageWelcome(clientId: string) {
+	const messages = messageCache.sliceAfter();
+	return makeWelcome(clientId, messages, messageTimestamp(messages));
+}
+
+function makeServerWelcome(maybeClientId: string | undefined) {
+	const [clientId, headers] = 
+		maybeClientId && maybeClientId.length > 0 ? 
+		[maybeClientId, undefined] :
+		newClientIdHeaders();
+	
+	const result: [Welcome, (Record<string,string> | undefined)] =
+		[makeMessageWelcome(clientId), headers];
+	
+	return result;
+}
+
+function makeMessageChat(lastTime: number) {
+	const messages = messageCache.sliceAfter(lastTime);
+	return makeChat(messages, messageTimestamp(messages));
+}
+
+function sendInitialMessage(
+	send: (data: string, id?: string) => void,
+	clientId: string,
+	lastTime = 0
+) {
+	const message =
+		lastTime > 0 ? makeMessageChat(lastTime) : makeMessageWelcome(clientId);
+	const messageId = String(message.timestamp);
+	send(JSON.stringify(message), messageId);
+}
+
+type TimerId = ReturnType<typeof setTimeout>;
+
+const streamer = new Streamer<TimerId>({
+	newClientIdHeaders,
+	schedule: (add, core, receiver) => setTimeout(add, 0, core, receiver),
+	clearTimer: (id) => clearTimeout(id),
+	sendInitialMessage,
+	onChange: (kind) => {
+		switch (kind) {
+			case STREAMER_CHANGE.messageSent:
+				return idleAction.markAction();
+
+			case STREAMER_CHANGE.running:
+				return idleAction.start();
+
+			case STREAMER_CHANGE.idle:
+				return idleAction.stop();
+		}
+	},
+});
+
+const subscribe = (
 	controller: SourceController,
 	args: { lastEventId: string | undefined; clientId: string | undefined }
-) {
-	const lastTime = timeFromLastEventId(args.lastEventId);
-
-	// 0. waiting -> 1. subscribed -> 2. unsubscribed
-	let status = 0;
-	let receiver: SourceController | undefined;
-
-	const [message, headers] = makeInitialMessage(args.clientId, lastTime);
-	const finalize = () => {
-		if (status > 0) return;
-
-		receiver = controller;
-
-		const messageId = epochTimestamp().toString();
-		const json = JSON.stringify(message);
-		controller.send(json, messageId);
-
-		addSubscriber(receiver);
-		status = 1;
-	};
-
-	const unsubscribe = () => {
-		const previous = status;
-		status = 2;
-		// subscription didn't finish, but will not subscribe
-		if (previous < 1) return true;
-
-		// already unsubscribed
-		if (!receiver) return false;
-
-		// actually unsubscribe
-		removeSubscriber(receiver);
-		receiver = undefined;
-		return true;
-	};
-
-	queueMicrotask(finalize);
-
-	return {
-		unsubscribe,
-		headers,
-	};
-}
+) =>
+	streamer.add(
+		controller.send,
+		args.clientId,
+		timeFromLastEventId(args.lastEventId)
+	);
 
 // --- BEGIN Long polling
 
-const longpoller = new Longpoller<ReturnType<typeof setTimeout>>({
+const longpoller = new Longpoller<TimerId>({
 	makeChat: (lastTime) => JSON.stringify(makeMessageChat(lastTime)),
-	makeKeepAlive: () => JSON.stringify(makeKeepAlive(epochTimestamp())),
-	makeWelcome: (clientId) => {
-		const [welcome, headers] = makeMessageWelcome(clientId);
+	makeKeepAlive: () => JSON.stringify(makeKeepAliveNowJson()),
+	makeWelcome: (maybeClientId) => {
+		const [welcome, headers] = makeServerWelcome(maybeClientId);
 		return [JSON.stringify(welcome), headers];
 	},
 	minMs: 2000, // 2 secs
@@ -183,8 +166,10 @@ function send(body: string, clientId: string) {
 		body,
 	};
 	messageCache.cache(message);
-	const chat = makeChat([message], message.timestamp);
-	sendMessage(chat);
+	streamer.send(
+		JSON.stringify(makeChat([message], message.timestamp)),
+		messageId(message.timestamp)
+	);
 	longpoller.markMessage();
 }
 
@@ -219,7 +204,7 @@ export {
 	fromFetchEventClientId,
 	fromRequestClientId,
 	longPoll,
-	makeMessageWelcome,
+	makeServerWelcome,
 	send,
 	subscribe,
 };

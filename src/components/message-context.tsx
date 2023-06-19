@@ -39,7 +39,7 @@ import {
 
 import {
 	fromFetchEventClientId,
-	makeMessageWelcome,
+	makeServerWelcome,
 	longPoll,
 	subscribe as subscribeToSource,
 } from '~/server/pub-sub';
@@ -106,7 +106,7 @@ async function connectServerSource(this: ServerFunctionEvent) {
 function serverSideLoad() {
 	const pageEvent = useRequest();
 	const clientId = fromFetchEventClientId(pageEvent);
-	const [message, headers] = makeMessageWelcome(clientId);
+	const [message, headers] = makeServerWelcome(clientId);
 
 	if (headers) {
 		for (const [name, value] of Object.entries(headers))
