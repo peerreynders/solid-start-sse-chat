@@ -10,11 +10,17 @@ type Core<T> = {
 	polls: Set<Poll>;
 	nextSweep: number;
 	timer: T | undefined;
-	makeChat: (lastTime: number) => string;
-	makeKeepAlive: () => string;
-	makeWelcome: (
-		clientId: string | undefined
-	) => [message: string, headers: Record<string, string> | undefined];
+	respondChat: (
+		close: (data: string, headers?: Record<string, string>) => void,
+		lastTime: number
+	) => void;
+	respondKeepAlive: (
+		close: (data: string, headers?: Record<string, string>) => void
+	) => void;
+	respondWelcome: (
+		close: (data: string, headers?: Record<string, string>) => void,
+		maybeClientId: string | undefined
+	) => void;
 	minMs: number;
 	maxMs: number;
 	timeMs: () => number;
@@ -54,8 +60,6 @@ function sweep<T>(core: Core<T>) {
 	core.nextSweep = 0;
 
 	const now = core.timeMs();
-	// reuse the same keepAlive message
-	let keepAlive: string | undefined;
 	for (const poll of core.polls) {
 		// First poll that doesn't need to be released
 		// then no need to go further
@@ -66,14 +70,8 @@ function sweep<T>(core: Core<T>) {
 			break;
 
 		core.polls.delete(poll);
-		const message =
-			poll.messages < 1
-				? keepAlive
-					? keepAlive
-					: (keepAlive = core.makeKeepAlive())
-				: core.makeChat(poll.lastTime);
-
-		poll.close(message);
+		if (poll.messages < 1) core.respondKeepAlive(poll.close);
+		else core.respondChat(poll.close, poll.lastTime);
 	}
 
 	scheduleSweep(core);
@@ -83,7 +81,12 @@ const _core = Symbol('core');
 
 export type Link<T> = Pick<
 	Core<T>,
-	'makeChat' | 'makeKeepAlive' | 'makeWelcome' | 'minMs' | 'maxMs' | 'timeMs'
+	| 'respondChat'
+	| 'respondKeepAlive'
+	| 'respondWelcome'
+	| 'minMs'
+	| 'maxMs'
+	| 'timeMs'
 > & {
 	clearTimer: (id: T) => void;
 	setTimer: (cb: (arg: Core<T>) => void, delay: number, arg: Core<T>) => T;
@@ -100,9 +103,9 @@ class Longpoller<T> {
 			polls: new Set<Poll>(),
 			nextSweep: 0,
 			timer: undefined,
-			makeChat: link.makeChat,
-			makeKeepAlive: link.makeKeepAlive,
-			makeWelcome: link.makeWelcome,
+			respondChat: link.respondChat,
+			respondKeepAlive: link.respondKeepAlive,
+			respondWelcome: link.respondWelcome,
 			minMs: link.minMs,
 			maxMs: link.maxMs,
 			timeMs: link.timeMs,
@@ -127,7 +130,7 @@ class Longpoller<T> {
 			if (now <= poll.arrived + core.minMs) continue;
 
 			core.polls.delete(poll);
-			poll.close(core.makeChat(poll.lastTime));
+			core.respondChat(poll.close, poll.lastTime);
 		}
 		scheduleSweep(core);
 	}
@@ -140,14 +143,13 @@ class Longpoller<T> {
 	) {
 		const core = this[_core];
 		if (lastTime === 0 || !clientId) {
-			const [message, headers] = core.makeWelcome(clientId);
-			close(message, headers);
+			core.respondWelcome(close, clientId);
 
 			return undefined;
 		}
 
 		const poll: Poll = {
-			close: close,
+			close,
 			clientId: clientId,
 			lastTime,
 			arrived: core.timeMs(),

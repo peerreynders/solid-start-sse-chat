@@ -54,16 +54,16 @@ async function connectServerSource(this: ServerFunctionEvent) {
 
 	// Use `if(info.streamed === undefined) {` to force error to switch to long polling fallback
 	if (info.streamed) {
-		let unsubscribe: (() => void) | undefined = undefined;
+		let unregister: (() => void) | undefined = undefined;
 
 		const init: InitSource = (controller) => {
 			const result = subscribeToSource(controller, args);
-			unsubscribe = result.unsubscribe;
+			unregister = result.unregister;
 
 			const cleanup = () => {
-				if (unsubscribe) {
-					unsubscribe();
-					unsubscribe = undefined;
+				if (unregister) {
+					unregister();
+					unregister = undefined;
 				}
 				console.log('source closed');
 			};

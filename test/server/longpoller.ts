@@ -7,6 +7,25 @@ const suiteRuns: (() => void)[] = [];
 
 const longpoll = suite('Longpoll');
 
+function makeClient(clientId: string | undefined) {
+	const client: {
+		id: string | undefined;
+		data: string | undefined;
+		headers: Record<string,string> | undefined;
+		close: (data: string, headers?: Record<string,string>) => void;
+	} = {
+		id: clientId,
+		data: undefined,
+		headers: undefined,
+		close: (data: string, headers?: Record<string,string>) => {
+			client.data = data;
+			client.headers = headers;
+		}
+	};
+
+	return client;
+}
+
 function makeLinkHolder(time = 0) {
 	const holder: {
 		nextClientId: number;
@@ -41,19 +60,24 @@ function makeLinkHolder(time = 0) {
 			fn(arg);
 		},
 		link: {
-			makeChat: (lastTime: number) => `chat,${lastTime}`,
-			makeKeepAlive: () => `keep-alive,${holder.time}`,
-			makeWelcome: (clientId: string | undefined) => {
+			respondChat: (
+		    close: (data: string, headers?: Record<string,string>) => void,
+				lastTime: number
+			) => close(`chat,${lastTime}`),
+			respondKeepAlive: (
+		    close: (data: string, headers?: Record<string,string>) => void,
+			) => close(`keep-alive,${holder.time}`),
+			respondWelcome: (
+		    close: (data: string, headers?: Record<string,string>) => void,
+				clientId: string | undefined
+			) => {
 				if (clientId) {
-					const tuple: [string, undefined] = [`welcome,${clientId},${holder.time}`, undefined];
-					return tuple;
+					close(`welcome,${clientId},${holder.time}`);
+					return;
 				}
 				const id = holder.nextClientId--;
-				const tuple: [string, Record<string,string>] = [
-					`welcome,${id},${holder.time}`,
-					{ 'set-cookie': String(id) }
-				];
-				return tuple;
+				close(`welcome,${id},${holder.time}`, { 'set-cookie': String(id) });
+				return;
 			},
 			minMs: 2000,
 			maxMs: 15000,
@@ -83,25 +107,6 @@ function makeLinkHolder(time = 0) {
 		}
 	}
 	return holder;
-}
-
-function makeClient(clientId: string | undefined) {
-	const client: {
-		id: string | undefined;
-		data: string | undefined;
-		headers: Record<string,string> | undefined;
-		close: (data: string, headers?: Record<string,string>) => void;
-	} = {
-		id: clientId,
-		data: undefined,
-		headers: undefined,
-		close: (data: string, headers?: Record<string,string>) => {
-			client.data = data;
-			client.headers = headers;
-		}
-	};
-
-	return client;
 }
 
 // --- TESTS ---

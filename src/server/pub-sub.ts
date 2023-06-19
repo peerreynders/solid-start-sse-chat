@@ -48,6 +48,11 @@ const idleAction = new IdleAction({
 
 // --- BEGIN Subscriptions
 
+function timeFromLastEventId(lastEventId: string | undefined) {
+	const lastId = Number(lastEventId);
+	return Number.isNaN(lastId) || !isTimeValue(lastId) ? 0 : lastId;
+}
+
 const CLIENT_ID_NAME = '__client-id';
 
 function newClientIdHeaders() {
@@ -64,25 +69,22 @@ function newClientIdHeaders() {
 const messageTimestamp = (messages: ChatMessage[]) =>
 	messages.length > 0 ? messages[0].timestamp : epochTimestamp();
 
-function timeFromLastEventId(lastEventId: string | undefined) {
-	const lastId = Number(lastEventId);
-	return Number.isNaN(lastId) || !isTimeValue(lastId) ? 0 : lastId;
-}
-
 function makeMessageWelcome(clientId: string) {
 	const messages = messageCache.sliceAfter();
 	return makeWelcome(clientId, messages, messageTimestamp(messages));
 }
 
 function makeServerWelcome(maybeClientId: string | undefined) {
-	const [clientId, headers] = 
-		maybeClientId && maybeClientId.length > 0 ? 
-		[maybeClientId, undefined] :
-		newClientIdHeaders();
-	
-	const result: [Welcome, (Record<string,string> | undefined)] =
-		[makeMessageWelcome(clientId), headers];
-	
+	const [clientId, headers] =
+		maybeClientId && maybeClientId.length > 0
+			? [maybeClientId, undefined]
+			: newClientIdHeaders();
+
+	const result: [Welcome, Record<string, string> | undefined] = [
+		makeMessageWelcome(clientId),
+		headers,
+	];
+
 	return result;
 }
 
@@ -91,24 +93,17 @@ function makeMessageChat(lastTime: number) {
 	return makeChat(messages, messageTimestamp(messages));
 }
 
-function sendInitialMessage(
-	send: (data: string, id?: string) => void,
-	clientId: string,
-	lastTime = 0
-) {
-	const message =
-		lastTime > 0 ? makeMessageChat(lastTime) : makeMessageWelcome(clientId);
-	const messageId = String(message.timestamp);
-	send(JSON.stringify(message), messageId);
-}
-
 type TimerId = ReturnType<typeof setTimeout>;
 
 const streamer = new Streamer<TimerId>({
 	newClientIdHeaders,
 	schedule: (add, core, receiver) => setTimeout(add, 0, core, receiver),
 	clearTimer: (id) => clearTimeout(id),
-	sendInitialMessage,
+	sendInitialMessage: (send, clientId, lastTime = 0) => {
+		const message =
+			lastTime > 0 ? makeMessageChat(lastTime) : makeMessageWelcome(clientId);
+		send(JSON.stringify(message), messageId(message.timestamp));
+	},
 	onChange: (kind) => {
 		switch (kind) {
 			case STREAMER_CHANGE.messageSent:
@@ -134,13 +129,13 @@ const subscribe = (
 	);
 
 // --- BEGIN Long polling
-
 const longpoller = new Longpoller<TimerId>({
-	makeChat: (lastTime) => JSON.stringify(makeMessageChat(lastTime)),
-	makeKeepAlive: () => JSON.stringify(makeKeepAliveNowJson()),
-	makeWelcome: (maybeClientId) => {
+	respondChat: (close, lastTime) =>
+		close(JSON.stringify(makeMessageChat(lastTime))),
+	respondKeepAlive: (close) => close(makeKeepAliveNowJson()),
+	respondWelcome: (close, maybeClientId) => {
 		const [welcome, headers] = makeServerWelcome(maybeClientId);
-		return [JSON.stringify(welcome), headers];
+		close(JSON.stringify(welcome), headers);
 	},
 	minMs: 2000, // 2 secs
 	maxMs: KEEP_ALIVE_MS,

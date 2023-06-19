@@ -54,7 +54,7 @@ function addReceiver<T>(core: Core<T>, receiver: Receiver<T>) {
 
 const _core = Symbol('core');
 
-type Link<T> = Pick<
+export type Link<T> = Pick<
 	Core<T>,
 	| 'newClientIdHeaders'
 	| 'schedule'
@@ -96,7 +96,7 @@ class Streamer<T> {
 			lastTime,
 		};
 
-		const unsubscribe = () => {
+		const unregister = () => {
 			if (receiver.openId) {
 				// receiver hasn't been added yet
 				core.clearTimer(receiver.openId);
@@ -114,13 +114,15 @@ class Streamer<T> {
 		receiver.openId = core.schedule(addReceiver, core, receiver);
 
 		return {
-			unsubscribe,
-			headers
+			unregister,
+			headers,
 		};
 	}
 
 	send(data: string, id?: string) {
 		const { onChange, receivers } = this[_core];
+		if (receivers.size < 1) return;
+
 		for (const rec of receivers) {
 			rec.send(data, id);
 		}
