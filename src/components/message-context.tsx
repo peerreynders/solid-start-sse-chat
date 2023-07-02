@@ -17,6 +17,8 @@ import {
 	type Welcome,
 } from '~/lib/chat';
 
+import { KeepAlive } from './keep-alive';
+
 // import { scheduleCompare } from '~/lib/row-monitor';
 
 // --- BEGIN server side ---
@@ -123,7 +125,6 @@ function serverSideLoad() {
 const msSinceStart = () => Math.trunc(performance.now());
 const historyPool: [ChatMessage[], ChatMessage[]] = [[], []];
 let currentHistory = 0;
-let lastMessageMs = msSinceStart();
 
 function resetHistory(messages: ChatMessage[]) {
 	const next = 1 - currentHistory;
@@ -186,7 +187,7 @@ const contextHolder = makeHolder();
 const MessageContext = createContext(contextHolder.context);
 
 function update(message: Message) {
-	lastMessageMs = msSinceStart();
+	extendKeepAlive();
 
 	switch (message.kind) {
 		case 'chat': {
@@ -211,37 +212,15 @@ function update(message: Message) {
 }
 
 // --- BEGIN Keep alive timer
-
-const KEEP_ALIVE_MS = 20000;
-let keepAliveTimeout: ReturnType<typeof setTimeout> | undefined;
 let start: () => void | undefined;
-
-function keepAlive() {
-	const silence = msSinceStart() - lastMessageMs;
-	const delay =
-		silence < KEEP_ALIVE_MS ? KEEP_ALIVE_MS - silence : KEEP_ALIVE_MS;
-	if (delay < KEEP_ALIVE_MS) {
-		keepAliveTimeout = setTimeout(keepAlive, delay);
-		return;
-	}
-
-	keepAliveTimeout = undefined;
-	start?.();
-}
-
-function startKeepAlive() {
-	if (keepAliveTimeout) return;
-
-	lastMessageMs = msSinceStart();
-	keepAliveTimeout = setTimeout(keepAlive, KEEP_ALIVE_MS);
-}
-
-function stopKeepAlive() {
-	if (!keepAliveTimeout) return;
-
-	clearTimeout(keepAliveTimeout);
-	keepAliveTimeout = undefined;
-}
+const keepAlive = new KeepAlive({
+	actionMs: 20000, // 20 secs
+	action: () => start?.(),
+	timeMs: msSinceStart,
+	schedule: (action, delay, core) => setTimeout(action, delay, core),
+	clearTimer: clearTimeout,
+});
+const extendKeepAlive = () => keepAlive.start();
 
 // --- BEGIN general connection
 
@@ -279,7 +258,7 @@ const READY_STATE_CLOSED = 2;
 let eventSource: EventSource | undefined;
 
 function onMessage(event: MessageEvent<string>) {
-	lastMessageMs = msSinceStart();
+	extendKeepAlive();
 	if (event.lastEventId) lastEventId = event.lastEventId;
 
 	const message = fromJson(event.data);
@@ -292,7 +271,7 @@ function onMessage(event: MessageEvent<string>) {
 function disconnectEventSource() {
 	if (!eventSource) return;
 
-	stopKeepAlive();
+	keepAlive.stop();
 	eventSource.removeEventListener('message', onMessage);
 	eventSource.removeEventListener('error', onError);
 	eventSource.close();
@@ -319,7 +298,7 @@ function connectEventSource(basepath: string) {
 	connectStatus = STATUS_WAITING;
 	eventSource.addEventListener('error', onError);
 	eventSource.addEventListener('message', onMessage);
-	startKeepAlive();
+	keepAlive.start();
 }
 
 // --- BEGIN long polling
@@ -331,7 +310,7 @@ let abort: AbortController | undefined;
 let aborted = 0;
 
 function disconnectPoll() {
-	stopKeepAlive();
+	keepAlive.stop();
 
 	if (startPollTimeout) {
 		clearTimeout(startPollTimeout);
@@ -361,9 +340,9 @@ async function fetchPoll(path: string) {
 		const href = toHref(path, lastEventId, false);
 		abort = new AbortController();
 
-		startKeepAlive();
+		keepAlive.start();
 		const response = await fetch(href, { signal: abort.signal });
-		stopKeepAlive();
+		keepAlive.stop();
 
 		if (response.ok) {
 			const message = fromJson(await response.text());

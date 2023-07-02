@@ -11,16 +11,16 @@ function makeClient(clientId: string | undefined) {
 	const client: {
 		id: string | undefined;
 		data: string | undefined;
-		headers: Record<string,string> | undefined;
-		close: (data: string, headers?: Record<string,string>) => void;
+		headers: Record<string, string> | undefined;
+		close: (data: string, headers?: Record<string, string>) => void;
 	} = {
 		id: clientId,
 		data: undefined,
 		headers: undefined,
-		close: (data: string, headers?: Record<string,string>) => {
+		close: (data: string, headers?: Record<string, string>) => {
 			client.data = data;
 			client.headers = headers;
-		}
+		},
 	};
 
 	return client;
@@ -35,25 +35,24 @@ function makeLinkHolder(time = 0) {
 		fn: Function | undefined;
 		arg: any | undefined;
 		time: number;
-		runTask: () => void,
+		runTask: () => void;
 		link: Link<ReturnType<typeof setTimeout>>;
 	} = {
 		nextClientId: 9999999,
 		nextTimerId: 9999999,
 		timerId: 0,
 		nextTime: 0,
-		fn:  undefined,
+		fn: undefined,
 		arg: undefined,
 		time,
 		runTask: () => {
-			if (!holder.fn) 
-				throw new assert.Assertion({ message: "No task to run" });
+			if (!holder.fn) throw new assert.Assertion({ message: 'No task to run' });
 
 			const fn = holder.fn;
 			const arg = holder.arg;
 
 			holder.timerId = 0;
-      holder.nextTime = 0;
+			holder.nextTime = 0;
 			holder.fn = undefined;
 			holder.arg = undefined;
 
@@ -61,14 +60,14 @@ function makeLinkHolder(time = 0) {
 		},
 		link: {
 			respondChat: (
-		    close: (data: string, headers?: Record<string,string>) => void,
+				close: (data: string, headers?: Record<string, string>) => void,
 				lastTime: number
 			) => close(`chat,${lastTime}`),
 			respondKeepAlive: (
-		    close: (data: string, headers?: Record<string,string>) => void,
+				close: (data: string, headers?: Record<string, string>) => void
 			) => close(`keep-alive,${holder.time}`),
 			respondWelcome: (
-		    close: (data: string, headers?: Record<string,string>) => void,
+				close: (data: string, headers?: Record<string, string>) => void,
 				clientId: string | undefined
 			) => {
 				if (clientId) {
@@ -83,19 +82,21 @@ function makeLinkHolder(time = 0) {
 			maxMs: 15000,
 			timeMs: () => holder.time,
 			clearTimer: (id: number) => {
-				if (id !== holder.timerId) 
-					throw new assert.Assertion({ message: "Cleared timerId doesn't match" });
-				
+				if (id !== holder.timerId)
+					throw new assert.Assertion({
+						message: "Cleared timerId doesn't match",
+					});
+
 				holder.timerId = 0;
-        holder.nextTime = 0;
+				holder.nextTime = 0;
 				holder.fn = undefined;
 				holder.arg = undefined;
 			},
 			setTimer: (fn: Function, delay: number, arg: any) => {
 				const id = holder.nextTimerId--;
 
-				if (holder.timerId) 
-					throw new assert.Assertion({ message: "timerId already taken" });
+				if (holder.timerId)
+					throw new assert.Assertion({ message: 'timerId already taken' });
 
 				holder.timerId = id;
 				holder.nextTime = holder.time + delay;
@@ -103,9 +104,9 @@ function makeLinkHolder(time = 0) {
 				holder.arg = arg;
 
 				return id;
-			}
-		}
-	}
+			},
+		},
+	};
 	return holder;
 }
 
@@ -121,12 +122,23 @@ longpoll('Immediate Welcome message and client Id header', () => {
 	poller.add(client.close, client.id, lastTime);
 
 	// Then
-	assert.is(client.data, 'welcome,9999999,1000', 'Welcome message was not dispatched');
-	assert.equal(client.headers, { 'set-cookie': '9999999' }, 'Missing client header');
+	assert.is(
+		client.data,
+		'welcome,9999999,1000',
+		'Welcome message was not dispatched'
+	);
+	assert.equal(
+		client.headers,
+		{ 'set-cookie': '9999999' },
+		'Missing client header'
+	);
 
 	// No further sweep scheduled
-	assert.ok(holder.nextTime === 0 && holder.timerId === 0, 'Unexpected timer scheduled');
-	assert.type(holder.fn,'undefined', 'sweep function unexpectedly scheduled');
+	assert.ok(
+		holder.nextTime === 0 && holder.timerId === 0,
+		'Unexpected timer scheduled'
+	);
+	assert.type(holder.fn, 'undefined', 'sweep function unexpectedly scheduled');
 	assert.type(holder.arg, 'undefined', 'unexpected sweep core argument');
 });
 
@@ -140,12 +152,19 @@ longpoll('Immediate Welcome message with client ID', () => {
 	poller.add(client.close, client.id, lastTime);
 
 	// Then
-	assert.is(client.data, 'welcome,AAAAAAA,1000', 'Welcome message was not dispatched');
+	assert.is(
+		client.data,
+		'welcome,AAAAAAA,1000',
+		'Welcome message was not dispatched'
+	);
 	assert.type(client.headers, 'undefined', 'unexpected client headers');
 
 	// No further sweep scheduled
-	assert.ok(holder.nextTime === 0 && holder.timerId === 0, 'Unexpected timer scheduled');
-	assert.type(holder.fn,'undefined', 'sweep function unexpectedly scheduled');
+	assert.ok(
+		holder.nextTime === 0 && holder.timerId === 0,
+		'Unexpected timer scheduled'
+	);
+	assert.type(holder.fn, 'undefined', 'sweep function unexpectedly scheduled');
 	assert.type(holder.arg, 'undefined', 'unexpected sweep core argument');
 });
 
@@ -158,7 +177,7 @@ longpoll('send keep alive after maxMs', () => {
 
 	poller.add(client.close, client.id, lastTime);
 
-	assert.type(holder.fn,'function', 'sweep function not scheduled');
+	assert.type(holder.fn, 'function', 'sweep function not scheduled');
 	assert.type(holder.arg, 'object', 'missing core argument');
 	assert.is(holder.nextTime, 16000, 'not scheduled with maxMs');
 
@@ -167,11 +186,18 @@ longpoll('send keep alive after maxMs', () => {
 	holder.runTask();
 
 	// Then
-	assert.is(client.data, 'keep-alive,16005', 'keep alive message was not dispatched');
+	assert.is(
+		client.data,
+		'keep-alive,16005',
+		'keep alive message was not dispatched'
+	);
 	assert.type(client.headers, 'undefined', 'unexpected client headers');
 
 	// No further sweep scheduled
-	assert.ok(holder.nextTime === 0 && holder.timerId === 0, 'Unexpected timer scheduled');
+	assert.ok(
+		holder.nextTime === 0 && holder.timerId === 0,
+		'Unexpected timer scheduled'
+	);
 });
 
 longpoll('send existing message after minMs', () => {
@@ -183,20 +209,27 @@ longpoll('send existing message after minMs', () => {
 
 	poller.add(client.close, client.id, lastTime, 1);
 
-	assert.type(holder.fn,'function', 'sweep function not scheduled');
+	assert.type(holder.fn, 'function', 'sweep function not scheduled');
 	assert.type(holder.arg, 'object', 'missing core argument');
 	assert.is(holder.nextTime, 3000, 'not scheduled with minMs');
 
 	// When
 	holder.time += 2000 + 5;
 	holder.runTask();
-	
-  // Then
-	assert.is(client.data, 'chat,1800000000000', 'chat message was not dispatched');
+
+	// Then
+	assert.is(
+		client.data,
+		'chat,1800000000000',
+		'chat message was not dispatched'
+	);
 	assert.type(client.headers, 'undefined', 'unexpected client headers');
-	
+
 	// No further sweep scheduled
-	assert.ok(holder.nextTime === 0 && holder.timerId === 0, 'Unexpected timer scheduled');
+	assert.ok(
+		holder.nextTime === 0 && holder.timerId === 0,
+		'Unexpected timer scheduled'
+	);
 });
 
 longpoll('send recent message after minMs', () => {
@@ -208,7 +241,7 @@ longpoll('send recent message after minMs', () => {
 
 	poller.add(client.close, client.id, lastTime, 0);
 
-	assert.type(holder.fn,'function', 'sweep function not scheduled');
+	assert.type(holder.fn, 'function', 'sweep function not scheduled');
 	assert.type(holder.arg, 'object', 'missing core argument');
 	assert.is(holder.nextTime, 16000, 'not scheduled with minMs');
 
@@ -219,13 +252,20 @@ longpoll('send recent message after minMs', () => {
 	// When
 	holder.time += 1000 + 5;
 	holder.runTask();
-	
-  // Then
-	assert.is(client.data, 'chat,1800000000000', 'chat message was not dispatched');
+
+	// Then
+	assert.is(
+		client.data,
+		'chat,1800000000000',
+		'chat message was not dispatched'
+	);
 	assert.type(client.headers, 'undefined', 'unexpected client headers');
 
 	// No further sweep scheduled
-	assert.ok(holder.nextTime === 0 && holder.timerId === 0, 'Unexpected timer scheduled');
+	assert.ok(
+		holder.nextTime === 0 && holder.timerId === 0,
+		'Unexpected timer scheduled'
+	);
 });
 
 longpoll('After minMs send message immediately', () => {
@@ -237,19 +277,26 @@ longpoll('After minMs send message immediately', () => {
 
 	poller.add(client.close, client.id, lastTime, 0);
 
-	assert.type(holder.fn,'function', 'sweep function not scheduled');
+	assert.type(holder.fn, 'function', 'sweep function not scheduled');
 	assert.type(holder.arg, 'object', 'missing core argument');
 	assert.is(holder.nextTime, 16000, 'not scheduled with minMs');
 
 	holder.time += 3000;
 	poller.markMessage();
 
-  // Then
-	assert.is(client.data, 'chat,1800000000000', 'chat message was not dispatched');
+	// Then
+	assert.is(
+		client.data,
+		'chat,1800000000000',
+		'chat message was not dispatched'
+	);
 	assert.type(client.headers, 'undefined', 'unexpected client headers');
 
 	// No further sweep scheduled
-	assert.ok(holder.nextTime === 0 && holder.timerId === 0, 'Unexpected timer scheduled');
+	assert.ok(
+		holder.nextTime === 0 && holder.timerId === 0,
+		'Unexpected timer scheduled'
+	);
 });
 
 longpoll('send existing message after minMs each (2 clients)', () => {
@@ -263,7 +310,7 @@ longpoll('send existing message after minMs each (2 clients)', () => {
 
 	poller.add(clientA.close, clientA.id, lastTime, messages);
 
-	assert.type(holder.fn,'function', 'sweep function not scheduled');
+	assert.type(holder.fn, 'function', 'sweep function not scheduled');
 	assert.type(holder.arg, 'object', 'missing core argument');
 	assert.is(holder.nextTime, 3000, 'not scheduled with minMs');
 
@@ -276,17 +323,28 @@ longpoll('send existing message after minMs each (2 clients)', () => {
 	holder.time += 1000 + 5;
 	holder.runTask();
 
-	assert.is(clientA.data, 'chat,1800000001000', 'chat A message was not dispatched');
+	assert.is(
+		clientA.data,
+		'chat,1800000001000',
+		'chat A message was not dispatched'
+	);
 	assert.type(clientB.data, 'undefined', 'chat B dispatched too early');
 	assert.is(holder.nextTime, 4000, 'client B not scheduled with minMs');
 
 	holder.time += 1000;
 	holder.runTask();
-	
-	assert.is(clientB.data, 'chat,1800000002000', 'chat B message was not dispatched');
+
+	assert.is(
+		clientB.data,
+		'chat,1800000002000',
+		'chat B message was not dispatched'
+	);
 
 	// No further sweep scheduled
-	assert.ok(holder.nextTime === 0 && holder.timerId === 0, 'Unexpected timer scheduled');
+	assert.ok(
+		holder.nextTime === 0 && holder.timerId === 0,
+		'Unexpected timer scheduled'
+	);
 });
 
 longpoll('send recent message after minMs each (2 clients)', () => {
@@ -300,7 +358,7 @@ longpoll('send recent message after minMs each (2 clients)', () => {
 
 	poller.add(clientA.close, clientA.id, lastTime, messages);
 
-	assert.type(holder.fn,'function', 'sweep function not scheduled');
+	assert.type(holder.fn, 'function', 'sweep function not scheduled');
 	assert.type(holder.arg, 'object', 'missing core argument');
 	assert.is(holder.nextTime, 16000, 'not scheduled with maxMs');
 
@@ -317,17 +375,28 @@ longpoll('send recent message after minMs each (2 clients)', () => {
 	holder.time += 900 + 5;
 	holder.runTask();
 
-	assert.is(clientA.data, 'chat,1800000001000', 'chat A message was not dispatched');
+	assert.is(
+		clientA.data,
+		'chat,1800000001000',
+		'chat A message was not dispatched'
+	);
 	assert.type(clientB.data, 'undefined', 'chat B dispatched too early');
 	assert.is(holder.nextTime, 4000, 'client B not scheduled with minMs');
 
 	holder.time += 1000;
 	holder.runTask();
-	
-	assert.is(clientB.data, 'chat,1800000002000', 'chat B message was not dispatched');
+
+	assert.is(
+		clientB.data,
+		'chat,1800000002000',
+		'chat B message was not dispatched'
+	);
 
 	// No further sweep scheduled
-	assert.ok(holder.nextTime === 0 && holder.timerId === 0, 'Unexpected timer scheduled');
+	assert.ok(
+		holder.nextTime === 0 && holder.timerId === 0,
+		'Unexpected timer scheduled'
+	);
 });
 
 longpoll('send keep alive after maxMs each (2 clients)', () => {
@@ -341,7 +410,7 @@ longpoll('send keep alive after maxMs each (2 clients)', () => {
 
 	poller.add(clientA.close, clientA.id, lastTime, messages);
 
-	assert.type(holder.fn,'function', 'sweep function not scheduled');
+	assert.type(holder.fn, 'function', 'sweep function not scheduled');
 	assert.type(holder.arg, 'object', 'missing core argument');
 	assert.is(holder.nextTime, 16000, 'not scheduled with maxMs');
 
@@ -350,22 +419,32 @@ longpoll('send keep alive after maxMs each (2 clients)', () => {
 
 	assert.is(holder.nextTime, 16000, 'not scheduled with maxMs');
 
-
 	// When
 	holder.time += 7000 + 5;
 	holder.runTask();
 
-	assert.is(clientA.data, 'keep-alive,16005', 'chat A message was not dispatched');
+	assert.is(
+		clientA.data,
+		'keep-alive,16005',
+		'chat A message was not dispatched'
+	);
 	assert.type(clientB.data, 'undefined', 'chat B dispatched too early');
 	assert.is(holder.nextTime, 24000, 'client B not scheduled with maxMs');
 
 	holder.time += 8000;
 	holder.runTask();
-	
-	assert.is(clientB.data, 'keep-alive,24005', 'chat B message was not dispatched');
+
+	assert.is(
+		clientB.data,
+		'keep-alive,24005',
+		'chat B message was not dispatched'
+	);
 
 	// No further sweep scheduled
-	assert.ok(holder.nextTime === 0 && holder.timerId === 0, 'Unexpected timer scheduled');
+	assert.ok(
+		holder.nextTime === 0 && holder.timerId === 0,
+		'Unexpected timer scheduled'
+	);
 });
 
 // --- TESTS END ---
@@ -376,6 +455,4 @@ function all() {
 	return suiteRuns.slice();
 }
 
-export {
-	all
-};
+export { all };

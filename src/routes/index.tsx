@@ -44,6 +44,23 @@ function showClientId(messages: ReturnType<typeof useMessages>) {
 	return typeof id === 'string' ? id : '???';
 }
 
+const MESSAGE_ERROR =
+	'At least one non-whitespace character is required to send';
+
+function onMessageInvalid(event: Event) {
+	if (!(event.target instanceof HTMLInputElement)) return;
+
+	event.target.setCustomValidity(MESSAGE_ERROR);
+	event.stopPropagation();
+}
+
+function onMessageInput(event: Event) {
+	if (!(event.target instanceof HTMLInputElement)) return;
+
+	event.target.setCustomValidity('');
+	event.stopPropagation();
+}
+
 export default function Home() {
 	const messages = useMessages();
 	onCleanup(disposeMessages);
@@ -72,7 +89,15 @@ export default function Home() {
 				<sendMessage.Form ref={$form} onsubmit={clearAfterSubmit}>
 					<label>
 						Message:
-						<input type="text" name="message" />
+						<input
+							type="text"
+							name="message"
+							required
+							pattern="^.*\S.*$"
+							oninput={onMessageInput}
+							oninvalid={onMessageInvalid}
+							title={MESSAGE_ERROR}
+						/>
 					</label>
 					<button type="submit" disabled={sending.pending}>
 						Send
