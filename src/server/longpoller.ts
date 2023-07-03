@@ -6,10 +6,12 @@ type Poll = {
 	messages: number;
 };
 
-type Core<T> = {
+type TimerId = ReturnType<typeof setTimeout>;
+
+type Core = {
 	polls: Set<Poll>;
 	nextSweep: number;
-	timer: T | undefined;
+	timer: TimerId | undefined;
 	respondChat: (
 		close: (data: string, headers?: Record<string, string>) => void,
 		lastTime: number
@@ -28,23 +30,33 @@ type Core<T> = {
 	setTimer: (delay: number) => void;
 };
 
-function stop<T>(core: Core<T>) {
+function stop(core: Core) {
 	if (!core.timer) return;
 
 	core.clearTimer();
 	core.nextSweep = 0;
 }
 
-function scheduleSweep<T>(core: Core<T>) {
+const pollRespondBy = (core: Core, poll: Poll) =>
+	poll.arrived + (poll.messages < 1 ? core.maxMs : core.minMs);
+
+function scheduleSweep(core: Core) {
 	if (core.polls.size < 1) return stop(core);
 
-	// First (and least recently added) poll
-	const head = core.polls.values().next().value as Poll;
-	// no messages since then wait maximum; otherwise minimum
-	const respondBy =
-		head.arrived + (head.messages < 1 ? core.maxMs : core.minMs);
-	const now = core.timeMs();
+	// Given: polls are iterated in insertion order
+	// i.e. poll.arrived increases.
+	const polls = core.polls.values();
+	let result: IteratorResult<Poll> = polls.next();
+	let respondBy = pollRespondBy(core, result.value);
+	for (result = polls.next(); !(result?.done ?? false); result = polls.next()) {
+		const p = result.value;
+		if (p.arrived > respondBy) break;
 
+		const releaseTime = pollRespondBy(core, p);
+		if (releaseTime < respondBy) respondBy = releaseTime;
+	}
+
+	const now = core.timeMs();
 	// nothing to do if response time in the future
 	// and next sweep coincides.
 	if (now < respondBy && core.nextSweep === respondBy) return;
@@ -54,20 +66,17 @@ function scheduleSweep<T>(core: Core<T>) {
 	core.setTimer(core.nextSweep - now);
 }
 
-function sweep<T>(core: Core<T>) {
+function sweep(core: Core) {
 	// Invoked via setTimeout only so no need to clearTimer
 	core.timer = undefined;
 	core.nextSweep = 0;
 
 	const now = core.timeMs();
+	const cutoff = now - core.minMs;
 	for (const poll of core.polls) {
-		// First poll that doesn't need to be released
-		// then no need to go further
-		if (
-			now < poll.arrived + core.minMs ||
-			(now < poll.arrived + core.maxMs && poll.messages < 1)
-		)
-			break;
+		if (cutoff < poll.arrived) break;
+
+		if (now < pollRespondBy(core, poll)) continue;
 
 		core.polls.delete(poll);
 		if (poll.messages < 1) core.respondKeepAlive(poll.close);
@@ -79,8 +88,8 @@ function sweep<T>(core: Core<T>) {
 
 const _core = Symbol('core');
 
-export type Link<T> = Pick<
-	Core<T>,
+export type Link = Pick<
+	Core,
 	| 'respondChat'
 	| 'respondKeepAlive'
 	| 'respondWelcome'
@@ -88,18 +97,18 @@ export type Link<T> = Pick<
 	| 'maxMs'
 	| 'timeMs'
 > & {
-	clearTimer: (id: T) => void;
-	setTimer: (cb: (arg: Core<T>) => void, delay: number, arg: Core<T>) => T;
+	clearTimer: (id: TimerId) => void;
+	setTimer: (cb: (arg: Core) => void, delay: number, arg: Core) => TimerId;
 };
 
-class Longpoller<T> {
-	[_core]: Core<T>;
+class Longpoller {
+	[_core]: Core;
 
-	constructor(link: Link<T>) {
+	constructor(link: Link) {
 		const setTimer = link.setTimer;
 		const clearTimer = link.clearTimer;
 
-		const core: Core<T> = {
+		const core: Core = {
 			polls: new Set<Poll>(),
 			nextSweep: 0,
 			timer: undefined,

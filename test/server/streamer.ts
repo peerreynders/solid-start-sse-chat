@@ -7,8 +7,6 @@ import {
 	type Link,
 } from '../../src/server/streamer';
 
-type TimerId = ReturnType<typeof setTimeout>;
-
 const suiteRuns: (() => void)[] = [];
 
 const streamer = suite('Streamer');
@@ -42,9 +40,9 @@ function makeLinkHolder(time = 0) {
 		timerId: number;
 		add: (() => void) | undefined;
 		runAdd: () => void;
-		sendChat: (streamer: Streamer<TimerId>) => void;
-		sendKeepAlive: (streamer: Streamer<TimerId>) => void;
-		link: Link<ReturnType<typeof setTimeout>>;
+		sendChat: (streamer: Streamer) => void;
+		sendKeepAlive: (streamer: Streamer) => void;
+		link: Link;
 	} = {
 		time,
 		get epochTime() {

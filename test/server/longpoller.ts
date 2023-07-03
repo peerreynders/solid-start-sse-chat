@@ -36,7 +36,7 @@ function makeLinkHolder(time = 0) {
 		arg: any | undefined;
 		time: number;
 		runTask: () => void;
-		link: Link<ReturnType<typeof setTimeout>>;
+		link: Link;
 	} = {
 		nextClientId: 9999999,
 		nextTimerId: 9999999,
@@ -438,6 +438,57 @@ longpoll('send keep alive after maxMs each (2 clients)', () => {
 		clientB.data,
 		'keep-alive,24005',
 		'chat B message was not dispatched'
+	);
+
+	// No further sweep scheduled
+	assert.ok(
+		holder.nextTime === 0 && holder.timerId === 0,
+		'Unexpected timer scheduled'
+	);
+});
+
+longpoll('later client with outstanding messages responds earlier', () => {
+	// Given
+	const lastTime = 1_800_000_001_000;
+	const holder = makeLinkHolder(1000);
+	const poller = new Longpoller(holder.link);
+	const clientA = makeClient('AAAAAAA');
+	const clientB = makeClient('BBBBBBB');
+
+	// @1000 clientA (3000, 16000) (earliest, latest) BUT 0 outstanding messages
+	poller.add(clientA.close, clientA.id, lastTime, 0);
+
+	console.log(holder);
+
+	assert.type(holder.fn, 'function', 'sweep function not scheduled');
+	assert.type(holder.arg, 'object', 'missing core argument');
+	assert.is(holder.nextTime, 16000, 'not scheduled with A:maxMs');
+
+	holder.time += 8000;
+	// @9000 clientB (11000, 24000) BUT 1 outstanding message
+	poller.add(clientB.close, clientB.id, lastTime - 8000, 1);
+
+	assert.is(holder.nextTime, 11000, 'not scheduled with B:minMs');
+
+	holder.time += 2000 + 5;
+	holder.runTask();
+	// @11005: client B should have a chat message, client A should still be waiting
+	assert.type(clientA.data, 'undefined', 'message A dispatched too early');
+	assert.is(
+		clientB.data,
+		'chat,1799999993000',
+		'chat B message was not dispatched'
+	);
+	assert.is(holder.nextTime, 16000, 'not scheduled with A:maxMs');
+
+	holder.time += 5000;
+	holder.runTask();
+
+	// @16005: client A should have a keep alive message
+	assert.is(
+		clientA.data,
+		'keep-alive,16005',
+		'chat A message was not dispatched'
 	);
 
 	// No further sweep scheduled

@@ -1,19 +1,21 @@
-type Receiver<T> = {
+type TimerId = ReturnType<typeof setTimeout>;
+
+type Receiver = {
 	send: (data: string, id?: string) => void;
-	openId: T | undefined;
+	openId: TimerId | undefined;
 	clientId: string;
 	lastTime: number;
 };
 
-type Core<T> = {
-	receivers: Set<Receiver<T>>;
+type Core = {
+	receivers: Set<Receiver>;
 	newClientIdHeaders: () => [clientId: string, headers: Record<string, string>];
 	schedule: (
-		fn: (core: Core<T>, receiver: Receiver<T>) => void,
-		core: Core<T>,
-		receiver: Receiver<T>
-	) => T;
-	clearTimer: (id: T) => void;
+		fn: (core: Core, receiver: Receiver) => void,
+		core: Core,
+		receiver: Receiver
+	) => TimerId;
+	clearTimer: (id: TimerId) => void;
 	sendInitialMessage: (
 		send: (data: string, id?: string) => void,
 		clientId: string,
@@ -30,7 +32,7 @@ const STREAMER_CHANGE = {
 
 type ChangeKind = (typeof STREAMER_CHANGE)[keyof typeof STREAMER_CHANGE];
 
-function removeReceiver<T>(core: Core<T>, receiver: Receiver<T>) {
+function removeReceiver(core: Core, receiver: Receiver) {
 	const lastSize = core.receivers.size;
 	const result = core.receivers.delete(receiver);
 	if (!result) return false;
@@ -39,7 +41,7 @@ function removeReceiver<T>(core: Core<T>, receiver: Receiver<T>) {
 	return true;
 }
 
-function addReceiver<T>(core: Core<T>, receiver: Receiver<T>) {
+function addReceiver(core: Core, receiver: Receiver) {
 	// Check if unsubscribed already
 	if (!receiver.openId) return;
 
@@ -54,8 +56,8 @@ function addReceiver<T>(core: Core<T>, receiver: Receiver<T>) {
 
 const _core = Symbol('core');
 
-export type Link<T> = Pick<
-	Core<T>,
+export type Link = Pick<
+	Core,
 	| 'newClientIdHeaders'
 	| 'schedule'
 	| 'clearTimer'
@@ -63,12 +65,12 @@ export type Link<T> = Pick<
 	| 'onChange'
 >;
 
-class Streamer<T> {
-	[_core]: Core<T>;
+class Streamer {
+	[_core]: Core;
 
-	constructor(link: Link<T>) {
+	constructor(link: Link) {
 		this[_core] = {
-			receivers: new Set<Receiver<T>>(),
+			receivers: new Set<Receiver>(),
 			newClientIdHeaders: link.newClientIdHeaders,
 			schedule: link.schedule,
 			clearTimer: link.clearTimer,
@@ -77,11 +79,7 @@ class Streamer<T> {
 		};
 	}
 
-	add(
-		send: Receiver<T>['send'],
-		maybeClientId: string | undefined,
-		lastTime = 0
-	) {
+	add(send: Receiver['send'], maybeClientId: string | undefined, lastTime = 0) {
 		const core = this[_core];
 
 		const [clientId, headers] =
@@ -89,7 +87,7 @@ class Streamer<T> {
 				? [maybeClientId, undefined]
 				: core.newClientIdHeaders();
 
-		const receiver: Receiver<T> = {
+		const receiver: Receiver = {
 			send,
 			openId: undefined,
 			clientId,

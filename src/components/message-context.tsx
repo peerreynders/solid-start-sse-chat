@@ -18,6 +18,7 @@ import {
 } from '~/lib/chat';
 
 import { KeepAlive } from './keep-alive';
+import { Longpoller } from './longpoller';
 
 // import { scheduleCompare } from '~/lib/row-monitor';
 
@@ -123,6 +124,10 @@ function serverSideLoad() {
 // --- BEGIN Context value
 
 const msSinceStart = () => Math.trunc(performance.now());
+
+type TimerId = ReturnType<typeof setTimeout>;
+const clearTimer = (id: TimerId) => clearTimeout(id);
+
 const historyPool: [ChatMessage[], ChatMessage[]] = [[], []];
 let currentHistory = 0;
 
@@ -218,9 +223,10 @@ const keepAlive = new KeepAlive({
 	action: () => start?.(),
 	timeMs: msSinceStart,
 	schedule: (action, delay, core) => setTimeout(action, delay, core),
-	clearTimer: clearTimeout,
+	clearTimer,
 });
-const extendKeepAlive = () => keepAlive.start();
+const extendKeepAlive = keepAlive.start;
+const stopKeepAlive = keepAlive.stop;
 
 // --- BEGIN general connection
 
@@ -302,89 +308,48 @@ function connectEventSource(basepath: string) {
 }
 
 // --- BEGIN long polling
+function prepareMessageFetch(path: string) {
+	const abort = new AbortController();
+	const fn = async () => {
+		let result = false;
 
-const LONG_POLL_WAIT_MS = 50; // 50 milliseconds
-const BACKOFF_MS = 10000;
-let startPollTimeout: ReturnType<typeof setTimeout> | undefined;
-let abort: AbortController | undefined;
-let aborted = 0;
+		try {
+			const href = toHref(path, lastEventId, false);
+			keepAlive.start();
+			const response = await fetch(href, { signal: abort.signal });
+			keepAlive.stop();
 
-function disconnectPoll() {
-	keepAlive.stop();
-
-	if (startPollTimeout) {
-		clearTimeout(startPollTimeout);
-		startPollTimeout = undefined;
-	}
-
-	if (abort) {
-		abort.abort();
-		abort = undefined;
-	}
-}
-
-function pollFailed() {
-	connectStatus = STATUS_FAILED;
-	disconnectPoll();
-}
-
-async function fetchPoll(path: string) {
-	startPollTimeout = undefined;
-	console.assert(
-		abort === undefined,
-		'poll abort unexpectedly set (fetchPoll)'
-	);
-
-	let waitMs = -1;
-	try {
-		const href = toHref(path, lastEventId, false);
-		abort = new AbortController();
-
-		keepAlive.start();
-		const response = await fetch(href, { signal: abort.signal });
-		keepAlive.stop();
-
-		if (response.ok) {
-			const message = fromJson(await response.text());
-			if (message) {
-				lastEventId = String(message.timestamp);
-				update(message);
-				waitMs = LONG_POLL_WAIT_MS;
+			if (response.ok) {
+				const message = fromJson(await response.text());
+				if (message) {
+					lastEventId = String(message.timestamp);
+					update(message);
+					result = true;
+				}
+			}
+		} catch (error) {
+			keepAlive.stop();
+			if (!(error instanceof DOMException && error.name === 'AbortError')) {
+				// Wasn't aborted (by keepAlive)
+				throw error;
 			}
 		}
-		aborted = 0;
-	} catch (error) {
-		if (error instanceof DOMException && error.name === 'AbortError') {
-			// Aborted by disconnectPoll() (via keepAlive)
-			aborted += 1;
-			waitMs = 0;
-		} else {
-			console.error('fetchPoll', error instanceof Error ? error.name : error);
-		}
-	} finally {
-		if (waitMs > 0) {
-			startPollTimeout = setTimeout(fetchPoll, waitMs, path);
-		}
-		if (waitMs < 0) {
-			pollFailed();
-		}
-		abort = undefined;
-	}
+		return result;
+	};
+	fn.abort = () => abort.abort();
+
+	return fn;
 }
 
-function nextPollConnect(count: number) {
-	if (count < 1) return LONG_POLL_WAIT_MS;
-
-	return BACKOFF_MS;
-}
-
-function connectPoll(path: string) {
-	console.assert(
-		abort === undefined,
-		'poll abort unexpectedly set (connectPoll)'
-	);
-	startPollTimeout = setTimeout(fetchPoll, nextPollConnect(aborted), path);
-}
+const polling = new Longpoller({
+	betweenMs: 50,
+	backoffMs: 10000,
+	schedule: (fetchPoll, delayMs, core) => setTimeout(fetchPoll, delayMs, core),
+	prepareMessageFetch,
+	pollFailed: () => void (connectStatus = STATUS_FAILED),
+	clearTimer,
+	stopKeepAlive,
+});
 
 // --- BEGIN Context consumer reference count
 const [refCount, setRefCount] = createSignal(0);
@@ -395,18 +360,18 @@ const disposeMessages = () => setRefCount(decrement);
 
 // --- BEGIN Context Provider/Hook
 
-const isActive = () => Boolean(eventSource || abort || startPollTimeout);
+const isActive = () => Boolean(eventSource || polling.active);
 
 function disconnect() {
 	if (eventSource) disconnectEventSource();
-	else disconnectPoll();
+	else polling.disconnect();
 }
 
 function connect(basepath: string) {
 	if (refCount() < 1) return;
 
 	if (connectStatus !== STATUS_LONG_POLL) connectEventSource(basepath);
-	else connectPoll(basepath);
+	else polling.connect(basepath);
 }
 
 function setupMessageConnection(basepath: string) {

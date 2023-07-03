@@ -93,9 +93,7 @@ function makeMessageChat(lastTime: number) {
 	return makeChat(messages, messageTimestamp(messages));
 }
 
-type TimerId = ReturnType<typeof setTimeout>;
-
-const streamer = new Streamer<TimerId>({
+const streamer = new Streamer({
 	newClientIdHeaders,
 	schedule: (add, core, receiver) => setTimeout(add, 0, core, receiver),
 	clearTimer: (id) => clearTimeout(id),
@@ -129,7 +127,7 @@ const subscribe = (
 	);
 
 // --- BEGIN Long polling
-const longpoller = new Longpoller<TimerId>({
+const longpoller = new Longpoller({
 	respondChat: (close, lastTime) =>
 		close(JSON.stringify(makeMessageChat(lastTime))),
 	respondKeepAlive: (close) => close(makeKeepAliveNowJson()),
@@ -149,7 +147,8 @@ function longPoll(
 	args: { lastEventId: string | undefined; clientId: string | undefined }
 ) {
 	const lastTime = timeFromLastEventId(args.lastEventId);
-	return longpoller.add(controller.close, args.clientId, lastTime);
+	const messages = args.lastEventId ? messageCache.sizeAfter(lastTime) : 0;
+	return longpoller.add(controller.close, args.clientId, lastTime, messages);
 }
 
 // --- BEGIN Message dispatch

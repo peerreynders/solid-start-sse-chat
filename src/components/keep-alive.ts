@@ -21,18 +21,17 @@ function keepAlive(core: Core) {
 	core.action();
 }
 
-const _core = Symbol('core');
-
 export type Link = Pick<
 	Core,
 	'actionMs' | 'action' | 'timeMs' | 'schedule' | 'clearTimer'
 >;
 
 class KeepAlive {
-	[_core]: Core;
+	readonly start: () => void;
+	readonly stop: () => void;
 
 	constructor(link: Link) {
-		this[_core] = {
+		const core: Core = {
 			actionId: undefined,
 			lastTime: 0,
 			actionMs: link.actionMs,
@@ -41,24 +40,21 @@ class KeepAlive {
 			schedule: link.schedule,
 			clearTimer: link.clearTimer,
 		};
-	}
 
-	start() {
-		const core = this[_core];
-		core.lastTime = core.timeMs();
+		this.start = () => {
+			core.lastTime = core.timeMs();
 
-		if (core.actionId) return;
+			if (core.actionId) return;
 
-		core.actionId = core.schedule(keepAlive, core.actionMs, core);
-	}
+			core.actionId = core.schedule(keepAlive, core.actionMs, core);
+		};
 
-	stop() {
-		const core = this[_core];
+		this.stop = () => {
+			if (!core.actionId) return;
 
-		if (!core.actionId) return;
-
-		core.clearTimer(core.actionId);
-		core.actionId = undefined;
+			core.clearTimer(core.actionId);
+			core.actionId = undefined;
+		};
 	}
 }
 
