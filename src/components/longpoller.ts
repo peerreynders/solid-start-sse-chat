@@ -10,7 +10,7 @@ type Core = {
 	aborted: number;
 	prepared: PreparedFetch | undefined;
 	disconnect: () => void;
-	path: string;
+	href: string;
 	betweenMs: number;
 	backoffMs: number;
 	schedule: (
@@ -27,9 +27,9 @@ async function fetchByPoll(core: Core) {
 		core.prepared === undefined,
 		'prepared fetch  unexpectedly set (fetchByPoll)'
 	);
-	const { path, betweenMs, prepareMessageFetch, schedule } = core;
+	const { href, betweenMs, prepareMessageFetch, schedule } = core;
 
-	core.prepared = prepareMessageFetch(path);
+	core.prepared = prepareMessageFetch(href);
 	core.startId = undefined;
 	try {
 		core.aborted = (await core.prepared()) ? 0 : core.aborted;
@@ -79,7 +79,7 @@ class Longpoller {
 					core.prepared = undefined;
 				}
 			},
-			path: '',
+			href: '',
 			betweenMs: link.betweenMs,
 			backoffMs: link.backoffMs,
 			schedule: link.schedule,
@@ -90,13 +90,13 @@ class Longpoller {
 		this[_core] = core;
 	}
 
-	connect(path: string) {
+	connect(href: string) {
 		const core = this[_core];
 		console.assert(
 			core.prepared === undefined && core.startId === undefined,
 			'prepared fetch unexpectedly set (connect)'
 		);
-		core.path = path;
+		core.href = href;
 		const delay = core.aborted < 1 ? core.betweenMs : core.backoffMs;
 		core.startId = core.schedule(fetchByPoll, delay, core);
 	}

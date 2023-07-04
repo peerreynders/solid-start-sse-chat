@@ -3,22 +3,18 @@
 import {
 	createContext,
 	createEffect,
-	createSignal,
 	useContext,
 	type ParentProps,
 } from 'solid-js';
 import { isServer } from 'solid-js/web';
-import { createStore } from 'solid-js/store';
 
-import {
-	fromJson,
-	type ChatMessage,
-	type Message,
-	type Welcome,
-} from '~/lib/chat';
+import { fromJson, type Message } from '~/lib/chat';
 
+import { makeHistory } from './message-history';
 import { KeepAlive } from './keep-alive';
+import { Streamer } from './streamer';
 import { Longpoller } from './longpoller';
+import { makeCount } from './reference-count';
 
 // import { scheduleCompare } from '~/lib/row-monitor';
 
@@ -121,102 +117,15 @@ function serverSideLoad() {
 
 // --- END server side ---
 
-// --- BEGIN Context value
-
-const msSinceStart = () => Math.trunc(performance.now());
-
 type TimerId = ReturnType<typeof setTimeout>;
 const clearTimer = (id: TimerId) => clearTimeout(id);
+const msSinceStart = () => Math.trunc(performance.now());
 
-const historyPool: [ChatMessage[], ChatMessage[]] = [[], []];
-let currentHistory = 0;
+// --- Context value
+const [historyStore, history] = makeHistory();
+const MessageContext = createContext(historyStore);
 
-function resetHistory(messages: ChatMessage[]) {
-	const next = 1 - currentHistory;
-	const source = historyPool[currentHistory];
-	const target = historyPool[next];
-	target.splice(0, Infinity, ...messages);
-	source.length = 0;
-	currentHistory = next;
-	return target;
-}
-
-function shuntOnHistory(message?: ChatMessage[] | ChatMessage) {
-	if (!message) return historyPool[currentHistory];
-
-	const next = 1 - currentHistory;
-	const source = historyPool[currentHistory];
-	const target = historyPool[next];
-
-	if (Array.isArray(message)) {
-		for (let i = 0; i < message.length; i += 1) target[i] = message[i];
-	} else {
-		target[0] = message;
-	}
-
-	const offset = target.length;
-	for (let i = 0; i < source.length; i += 1) target[i + offset] = source[i];
-
-	source.length = 0;
-	currentHistory = next;
-	return target;
-}
-
-type ChatCore = {
-	id: string | undefined;
-	history: ChatMessage[];
-};
-
-function makeHolder() {
-	const [store, set] = createStore<ChatCore>({
-		id: undefined,
-		history: shuntOnHistory(),
-	});
-	const shuntMessages = (recent: ChatMessage[] | ChatMessage) =>
-		set('history', shuntOnHistory(recent));
-	const reset = (message: Welcome) => {
-		set({
-			id: message.id,
-			history: resetHistory(message.messages),
-		});
-	};
-
-	return {
-		context: store,
-		shuntMessages,
-		reset,
-	};
-}
-
-const contextHolder = makeHolder();
-const MessageContext = createContext(contextHolder.context);
-
-function update(message: Message) {
-	extendKeepAlive();
-
-	switch (message.kind) {
-		case 'chat': {
-			contextHolder.shuntMessages(message.messages);
-			// scheduleCompare();
-			console.log('chat', message.timestamp);
-			break;
-		}
-
-		case 'welcome': {
-			contextHolder.reset(message);
-			// scheduleCompare();
-			console.log('welcome', message.timestamp);
-			break;
-		}
-
-		case 'keep-alive': {
-			console.log('keep-alive', message.timestamp);
-			break;
-		}
-	}
-}
-
-// --- BEGIN Keep alive timer
+// --- Keep alive timer
 let start: () => void | undefined;
 const keepAlive = new KeepAlive({
 	actionMs: 20000, // 20 secs
@@ -225,7 +134,6 @@ const keepAlive = new KeepAlive({
 	schedule: (action, delay, core) => setTimeout(action, delay, core),
 	clearTimer,
 });
-const extendKeepAlive = keepAlive.start;
 const stopKeepAlive = keepAlive.stop;
 
 // --- BEGIN general connection
@@ -258,63 +166,63 @@ function toHref(basePath: string, eventId?: string, useSse = true) {
 	return query ? basePath + '?' + query : basePath;
 }
 
-// --- BEGIN event source
+function update(message: Message) {
+	switch (message.kind) {
+		case 'chat': {
+			history.shunt(message.messages);
+			// scheduleCompare();
+			console.log('chat', message.timestamp);
+			break;
+		}
 
-const READY_STATE_CLOSED = 2;
-let eventSource: EventSource | undefined;
+		case 'welcome': {
+			history.reset(message);
+			// scheduleCompare();
+			console.log('welcome', message.timestamp);
+			break;
+		}
 
-function onMessage(event: MessageEvent<string>) {
-	extendKeepAlive();
-	if (event.lastEventId) lastEventId = event.lastEventId;
-
-	const message = fromJson(event.data);
-	if (!message) return;
-
-	connectStatus = STATUS_MESSAGE;
-	update(message);
-}
-
-function disconnectEventSource() {
-	if (!eventSource) return;
-
-	keepAlive.stop();
-	eventSource.removeEventListener('message', onMessage);
-	eventSource.removeEventListener('error', onError);
-	eventSource.close();
-	eventSource = undefined;
-}
-
-function onError(event: Event) {
-	// No way to identify the reason here so try long polling next
-	if (
-		eventSource?.readyState === READY_STATE_CLOSED &&
-		connectStatus !== STATUS_MESSAGE
-	) {
-		connectStatus = STATUS_LONG_POLL;
-		disconnectEventSource();
-		setTimeout(start);
+		case 'keep-alive': {
+			console.log('keep-alive', message.timestamp);
+			break;
+		}
 	}
-	console.log('onError', event);
 }
 
-function connectEventSource(basepath: string) {
-	const href = toHref(basepath, lastEventId);
+// --- BEGIN event source
+// keepAlive terminates a stream which hasn't received a message
 
-	eventSource = new EventSource(href);
-	connectStatus = STATUS_WAITING;
-	eventSource.addEventListener('error', onError);
-	eventSource.addEventListener('message', onMessage);
-	keepAlive.start();
-}
+const streamer = new Streamer({
+	stopKeepAlive,
+	streamWaiting: () => {
+		connectStatus = STATUS_WAITING;
+		keepAlive.start();
+	},
+	streamFailed: () => {
+		connectStatus = STATUS_LONG_POLL;
+		setTimeout(start);
+	},
+	handleMessageData: (data: string, eventId: string | undefined) => {
+		keepAlive.start();
+		if (eventId) lastEventId = eventId;
+
+		const message = fromJson(data);
+		if (!message) return;
+
+		connectStatus = STATUS_MESSAGE;
+		update(message);
+	},
+});
 
 // --- BEGIN long polling
-function prepareMessageFetch(path: string) {
+// keepAlive will abort/retry a fetch that is taking too long
+
+function prepareMessageFetch(href: string) {
 	const abort = new AbortController();
 	const fn = async () => {
 		let result = false;
 
 		try {
-			const href = toHref(path, lastEventId, false);
 			keepAlive.start();
 			const response = await fetch(href, { signal: abort.signal });
 			keepAlive.stop();
@@ -351,27 +259,24 @@ const polling = new Longpoller({
 	stopKeepAlive,
 });
 
-// --- BEGIN Context consumer reference count
-const [refCount, setRefCount] = createSignal(0);
-const increment = (n: number) => n + 1;
-const decrement = (n: number) => (n > 0 ? n - 1 : 0);
-
-const disposeMessages = () => setRefCount(decrement);
-
 // --- BEGIN Context Provider/Hook
 
-const isActive = () => Boolean(eventSource || polling.active);
+const [referenceCount, references] = makeCount();
+const disposeMessages = references.decrement;
+
+const isActive = () => streamer.active || polling.active;
 
 function disconnect() {
-	if (eventSource) disconnectEventSource();
+	if (streamer.active) streamer.disconnect();
 	else polling.disconnect();
 }
 
 function connect(basepath: string) {
-	if (refCount() < 1) return;
+	if (referenceCount() < 1) return;
 
-	if (connectStatus !== STATUS_LONG_POLL) connectEventSource(basepath);
-	else polling.connect(basepath);
+	if (connectStatus !== STATUS_LONG_POLL)
+		streamer.connect(toHref(basepath, lastEventId));
+	else polling.connect(toHref(basepath, lastEventId, false));
 }
 
 function setupMessageConnection(basepath: string) {
@@ -381,7 +286,7 @@ function setupMessageConnection(basepath: string) {
 	};
 
 	createEffect(() => {
-		const count = refCount();
+		const count = referenceCount();
 
 		if (count < 1) {
 			if (isActive()) {
@@ -402,21 +307,21 @@ function setupMessageConnection(basepath: string) {
 function MessageProvider(props: ParentProps) {
 	if (isServer) {
 		const message = serverSideLoad();
-		if (message) contextHolder.reset(message);
+		if (message) history.reset(message);
 	} else {
 		const stream = server$(connectServerSource);
 		setupMessageConnection(stream.url);
 	}
 
 	return (
-		<MessageContext.Provider value={contextHolder.context}>
+		<MessageContext.Provider value={historyStore}>
 			{props.children}
 		</MessageContext.Provider>
 	);
 }
 
 function useMessages() {
-	setRefCount(increment);
+	references.increment();
 	return useContext(MessageContext);
 }
 
