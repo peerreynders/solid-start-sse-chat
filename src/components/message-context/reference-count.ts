@@ -1,3 +1,5 @@
+// file: src/components/message-context/reference-count.ts
+
 import { createSignal, type Accessor } from 'solid-js';
 
 const increment = (n: number) => n + 1;

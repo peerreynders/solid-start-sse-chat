@@ -1,3 +1,5 @@
+// file src/components/message-context/longpoller.ts
+
 type TimerId = ReturnType<typeof setTimeout>;
 
 type PreparedFetch = {
@@ -102,7 +104,7 @@ class Longpoller {
 	}
 
 	get active() {
-		return this[_core].prepared || this[_core].startId;
+		return Boolean(this[_core].prepared || this[_core].startId);
 	}
 }
 

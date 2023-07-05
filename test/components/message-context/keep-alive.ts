@@ -1,7 +1,10 @@
 import { suite } from 'uvub';
 import * as assert from 'uvub/assert';
 
-import { KeepAlive, type Link } from '../../src/components/keep-alive';
+import {
+	KeepAlive,
+	type Link,
+} from '../../../src/components/message-context/keep-alive';
 
 type TimerId = ReturnType<typeof setTimeout>;
 

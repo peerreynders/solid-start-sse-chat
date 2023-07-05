@@ -1,3 +1,5 @@
+// file: src/server/pub-sub/longpoller.ts
+
 type Poll = {
 	close: (data: string, headers?: Record<string, string>) => void;
 	clientId: string;

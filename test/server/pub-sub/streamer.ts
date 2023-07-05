@@ -5,7 +5,7 @@ import {
 	Streamer,
 	STREAMER_CHANGE,
 	type Link,
-} from '../../src/server/streamer';
+} from '../../../src/server/pub-sub/streamer';
 
 const suiteRuns: (() => void)[] = [];
 

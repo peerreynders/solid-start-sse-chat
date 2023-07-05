@@ -1,3 +1,5 @@
+// file: src/server/pub-sub/streamer.ts
+
 type TimerId = ReturnType<typeof setTimeout>;
 
 type Receiver = {

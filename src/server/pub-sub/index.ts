@@ -1,7 +1,10 @@
-// file: src/server/pub-sub.ts
+// file: src/server/pub-sub/index.ts
 import { customAlphabet } from 'nanoid';
 import { FetchEvent } from 'solid-start/server';
-import { PollController, SourceController } from './solid-start-sse-support';
+import {
+	PollController,
+	SourceController,
+} from '~/server/solid-start-sse-support';
 import {
 	makeChat,
 	makeKeepAlive,

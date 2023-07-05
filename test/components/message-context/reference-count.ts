@@ -2,7 +2,7 @@ import { suite } from 'uvub';
 import * as assert from 'uvub/assert';
 import { createEffect, createRoot } from 'solid-js';
 
-import { makeCount } from '../../src/components/reference-count';
+import { makeCount } from '../../../src/components/message-context/reference-count';
 
 const suiteRuns: (() => void)[] = [];
 

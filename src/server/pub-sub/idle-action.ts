@@ -1,3 +1,5 @@
+// file: src/server/pub-sub/idle-action.ts
+
 export type Link<T> = {
 	maxIdleMs: number;
 	timeMs: () => number;

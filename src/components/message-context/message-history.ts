@@ -1,3 +1,5 @@
+// file: src/components/message-context/message-history.ts
+
 import { createStore, type Store } from 'solid-js/store';
 
 import type { ChatMessage, Welcome } from '~/lib/chat';

@@ -1,4 +1,6 @@
-import type { ChatMessage } from '../lib/chat';
+// file: src/server/pub-sub/message-cache.ts
+
+import type { ChatMessage } from '~/lib/chat';
 
 function lastFirstWhile(
 	latest: readonly ChatMessage[],

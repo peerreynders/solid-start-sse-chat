@@ -1,4 +1,4 @@
-// file: src/components/message-context
+// file: src/components/message-context/index.tsx
 
 import {
 	createContext,

@@ -1,7 +1,7 @@
 import { suite } from 'uvub';
 import * as assert from 'uvub/assert';
 
-import { Longpoller, type Link } from '../../src/server/longpoller';
+import { Longpoller, type Link } from '../../../src/server/pub-sub/longpoller';
 
 const suiteRuns: (() => void)[] = [];
 

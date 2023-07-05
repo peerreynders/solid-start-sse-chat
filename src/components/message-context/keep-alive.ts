@@ -1,3 +1,5 @@
+// file: src/components/message-context/keep-alive.ts
+
 type TimerId = ReturnType<typeof setTimeout>;
 
 type Core = {
