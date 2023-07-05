@@ -32,7 +32,7 @@ class Streamer implements EventListenerObject {
 				return;
 			}
 
-			if (event.type === 'Error') {
+			if (event.type === 'error') {
 				const { source, waiting } = this[_core];
 				// No way to identify the reason here so try long polling next
 				if (source?.readyState === READY_STATE_CLOSED && waiting) {

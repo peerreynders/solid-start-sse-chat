@@ -217,12 +217,13 @@ const streamer = new Streamer({
 // --- BEGIN long polling
 // keepAlive will abort/retry a fetch that is taking too long
 
-function prepareMessageFetch(href: string) {
+function prepareMessageFetch(basepath: string) {
 	const abort = new AbortController();
 	const fn = async () => {
 		let result = false;
 
 		try {
+			const href = toHref(basepath, lastEventId, false);
 			keepAlive.start();
 			const response = await fetch(href, { signal: abort.signal });
 			keepAlive.stop();
@@ -276,7 +277,7 @@ function connect(basepath: string) {
 
 	if (connectStatus !== STATUS_LONG_POLL)
 		streamer.connect(toHref(basepath, lastEventId));
-	else polling.connect(toHref(basepath, lastEventId, false));
+	else polling.connect(basepath);
 }
 
 function setupMessageConnection(basepath: string) {

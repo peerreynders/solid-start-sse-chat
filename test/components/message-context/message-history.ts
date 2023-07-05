@@ -2,7 +2,7 @@ import { suite } from 'uvub';
 import * as assert from 'uvub/assert';
 import { createEffect, createRoot } from 'solid-js';
 
-// --
+// ---
 import { unwrap } from 'solid-js/store';
 
 import { makeHistory } from '../../../src/components/message-context/message-history';

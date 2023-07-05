@@ -12,7 +12,7 @@ type Core = {
 	aborted: number;
 	prepared: PreparedFetch | undefined;
 	disconnect: () => void;
-	href: string;
+	path: string;
 	betweenMs: number;
 	backoffMs: number;
 	schedule: (
@@ -29,17 +29,21 @@ async function fetchByPoll(core: Core) {
 		core.prepared === undefined,
 		'prepared fetch  unexpectedly set (fetchByPoll)'
 	);
-	const { href, betweenMs, prepareMessageFetch, schedule } = core;
+	const { path, betweenMs, prepareMessageFetch, schedule } = core;
 
-	core.prepared = prepareMessageFetch(href);
+	core.prepared = prepareMessageFetch(path);
 	core.startId = undefined;
 	try {
-		core.aborted = (await core.prepared()) ? 0 : core.aborted;
+		const success = await core.prepared();
+		core.prepared = undefined;
 
-		if (!core.startId) {
-			// keepAlive & connect didn't already schedule another fetchByPoll
+		if (success) {
 			core.startId = schedule(fetchByPoll, betweenMs, core);
-			core.prepared = undefined;
+			core.aborted = 0;
+		} else {
+			// Aborted: Leave it to keepAlive/connect to
+			// schedule another fetchByPoll
+			core.aborted += 1;
 		}
 	} catch (error) {
 		console.error('fetchPoll', error instanceof Error ? error.name : error);
@@ -81,7 +85,7 @@ class Longpoller {
 					core.prepared = undefined;
 				}
 			},
-			href: '',
+			path: '',
 			betweenMs: link.betweenMs,
 			backoffMs: link.backoffMs,
 			schedule: link.schedule,
@@ -92,13 +96,13 @@ class Longpoller {
 		this[_core] = core;
 	}
 
-	connect(href: string) {
+	connect(path: string) {
 		const core = this[_core];
 		console.assert(
 			core.prepared === undefined && core.startId === undefined,
 			'prepared fetch unexpectedly set (connect)'
 		);
-		core.href = href;
+		core.path = path;
 		const delay = core.aborted < 1 ? core.betweenMs : core.backoffMs;
 		core.startId = core.schedule(fetchByPoll, delay, core);
 	}
