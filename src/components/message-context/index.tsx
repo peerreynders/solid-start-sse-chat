@@ -1,5 +1,4 @@
-// file: src/components/message-context/index.tsx
-
+// file: src/components/message-context/index.ts
 import {
 	createContext,
 	createEffect,
@@ -7,136 +6,23 @@ import {
 	type ParentProps,
 } from 'solid-js';
 import { isServer } from 'solid-js/web';
+import { basepathToMessages } from '../../route-path';
+import { MESSAGES_LAST_EVENT_ID, SSE_FALLBACK_SEARCH_PAIR } from '../../api';
 
-import { fromJson, type Message } from '~/lib/chat';
-
-import { makeHistory } from './message-history';
-import { KeepAlive } from './keep-alive';
 import { Streamer } from './streamer';
-import { Longpoller } from './longpoller';
 import { makeCount } from './reference-count';
+import { fromJson, type Message } from '../../lib/chat';
 
-// import { scheduleCompare } from '~/lib/row-monitor';
-
-// --- BEGIN server side ---
-
-import server$, {
-	ServerError,
-	useRequest,
-	type ServerFunctionEvent,
-} from 'solid-start/server';
-
-import {
-	SSE_FALLBACK_SEARCH_PAIR,
-	eventPoll,
-	eventStream,
-	requestInfo,
-	type InitPoll,
-	type InitSource,
-} from '~/server/solid-start-sse-support';
-// NOTE: call `listen()` in `entry-server.tsx`
-
-import {
-	fromFetchEventClientId,
-	makeServerWelcome,
-	longPoll,
-	subscribe as subscribeToSource,
-} from '~/server/pub-sub';
-
-async function connectServerSource(this: ServerFunctionEvent) {
-	const clientId = fromFetchEventClientId(this);
-	const info = requestInfo(this.request);
-	const args = {
-		lastEventId: info.lastEventId,
-		clientId,
-	};
-
-	// Use `if(info.streamed === undefined) {` to force error to switch to long polling fallback
-	if (info.streamed) {
-		let unregister: (() => void) | undefined = undefined;
-
-		const init: InitSource = (controller) => {
-			const result = subscribeToSource(controller, args);
-			unregister = result.unregister;
-
-			const cleanup = () => {
-				if (unregister) {
-					unregister();
-					unregister = undefined;
-				}
-				console.log('source closed');
-			};
-
-			return {
-				cleanup,
-				headers: result.headers,
-			};
-		};
-
-		return eventStream(this.request, init);
-	}
-
-	if (info.streamed === false) {
-		const init: InitPoll = (controller) => {
-			let close = longPoll(controller, args);
-			if (!close) {
-				console.log('poll closed');
-				return undefined;
-			}
-
-			const cleanup = () => {
-				if (close) {
-					close();
-					close = undefined;
-				}
-				console.log('poll closed');
-			};
-
-			// headers are passed via `controller.close`
-			return cleanup;
-		};
-
-		return eventPoll(this.request, init);
-	}
-
-	throw new ServerError('Unsupported Media Type', { status: 415 });
-}
-
-function serverSideLoad() {
-	const pageEvent = useRequest();
-	const clientId = fromFetchEventClientId(pageEvent);
-	const [message, headers] = makeServerWelcome(clientId);
-
-	if (headers) {
-		for (const [name, value] of Object.entries(headers))
-			pageEvent.responseHeaders.append(name, value);
-	}
-
-	return message.kind === 'welcome' ? message : undefined;
-}
-
-// --- END server side ---
-
-type TimerId = ReturnType<typeof setTimeout>;
-const clearTimer = (id: TimerId) => clearTimeout(id);
-const msSinceStart = () => Math.trunc(performance.now());
-
-// --- Context value
-const [historyStore, history] = makeHistory();
+const historyStore: Array<unknown> = [];
 const MessageContext = createContext(historyStore);
 
-// --- Keep alive timer
+// Once "wired up" `start` will `disconnect()` and then `connect()`. Used by
+// - keepAlive action
+// - to `try again` with long polling after SSE connection failed
+// - when the `useMessage` reference count increases from 0.
 let start: () => void | undefined;
-const keepAlive = new KeepAlive({
-	actionMs: 20000, // 20 secs
-	action: () => start?.(),
-	timeMs: msSinceStart,
-	schedule: (action, delay, core) => setTimeout(action, delay, core),
-	clearTimer,
-});
-const stopKeepAlive = keepAlive.stop;
 
-// --- BEGIN general connection
+// --- BEGIN  high-level connection (general)
 
 //  0 - No connection attempted
 //  1 - EventSource created
@@ -149,24 +35,36 @@ const STATUS_IDLE = 0;
 const STATUS_WAITING = 1;
 const STATUS_MESSAGE = 2;
 const STATUS_LONG_POLL = 3;
-const STATUS_FAILED = -1;
+const _STATUS_FAILED = -1;
 let connectStatus = STATUS_IDLE;
 let lastEventId: string | undefined;
 
-function toHref(basePath: string, eventId?: string, useSse = true) {
+// Connect to SSE getting all historical events:
+//		https:/example.com/api/messages
+// Connect to SSE with history after `eventId` 9999
+//		https:/example.com/api/messages?liastEventId=9999
+// Connect to long polling getting all historical events:
+//		https:/example.com/api/messages?sseLongPoll=1
+// Connect to long poling with history after `eventId` 9999
+//		https:/example.com/api/messages?sseLongPoll=1&lastEventId=9999
+//
+function hrefToMessages(basepath: string, eventId?: string, viaSse = true) {
 	const lastEvent = eventId
-		? 'lastEventId=' + encodeURIComponent(eventId)
+		? MESSAGES_LAST_EVENT_ID + '=' + encodeURIComponent(eventId)
 		: undefined;
-	const query = useSse
+
+	const query = viaSse
 		? lastEvent
 		: lastEvent
-		? SSE_FALLBACK_SEARCH_PAIR + '&' + lastEvent
-		: SSE_FALLBACK_SEARCH_PAIR;
+			? `${SSE_FALLBACK_SEARCH_PAIR}&${lastEvent}`
+			: SSE_FALLBACK_SEARCH_PAIR;
 
-	return query ? basePath + '?' + query : basePath;
+	return query ? `${basepath}?${query}` : basepath;
 }
 
 function update(message: Message) {
+	console.log(message);
+	/*
 	switch (message.kind) {
 		case 'chat': {
 			history.shunt(message.messages);
@@ -187,26 +85,50 @@ function update(message: Message) {
 			break;
 		}
 	}
+	*/
 }
 
-// --- BEGIN event source
-// keepAlive terminates a stream which hasn't received a message
+// --- BEGIN low-level SSE connection
 
+// Streamer Configuration:
+// - After (re-)connect (but before first message received)
+//	shift status to `STATUS_WAITING`
+//	(to detect a possible connection error later) and
+//	turn keepAlive ON.
+//
+// -Before disconnect turn KeepAlive off
+//
+// - If the stream fails (error event while `STATUS_WAITING`)
+// 	shift status to `STATUS_LONG_POLL` to force the next
+// 	high-level connection attempt to use long polling instead.
+// 	Then schedule the next HIGH-LEVEL connection attempt.
+//
+// - When data is received, refresh (delay) the keepAlive,
+// 	cache the `eventId`, parse the message data. Ignore if the
+// 	data isn't a recognized data type.
+// 	If it is a recognized data type, shift/reassert `STATUS_MESSAGE`
+// 	(i.e. a viable message connection) and submit the data for
+// 	further processing.
+//
 const streamer = new Streamer({
-	stopKeepAlive,
-	streamWaiting: () => {
+	beforeDisconnect: () => void (/* keepAlive.stop */ 0),
+	afterConnect: () => {
 		connectStatus = STATUS_WAITING;
-		keepAlive.start();
+		console.log('afterConnect');
+		// keepAlive.start()
 	},
 	streamFailed: () => {
 		connectStatus = STATUS_LONG_POLL;
+		console.log('streamFailed');
 		setTimeout(start);
 	},
-	handleMessageData: (data: string, eventId: string | undefined) => {
-		keepAlive.start();
+	handleMessageData: (data, eventId) => {
+		console.log('data', data, eventId);
+		// keepAlive.start()
 		if (eventId) lastEventId = eventId;
 
 		const message = fromJson(data);
+		console.log('message', message);
 		if (!message) return;
 
 		connectStatus = STATUS_MESSAGE;
@@ -214,104 +136,78 @@ const streamer = new Streamer({
 	},
 });
 
-// --- BEGIN long polling
-// keepAlive will abort/retry a fetch that is taking too long
+// --- CONTINUE High-level connection (using low-level controllers)
 
-function prepareMessageFetch(basepath: string) {
-	const abort = new AbortController();
-	const fn = async () => {
-		let result = false;
-
-		try {
-			const href = toHref(basepath, lastEventId, false);
-			keepAlive.start();
-			const response = await fetch(href, { signal: abort.signal });
-			keepAlive.stop();
-
-			if (response.ok) {
-				const message = fromJson(await response.text());
-				if (message) {
-					lastEventId = String(message.timestamp);
-					update(message);
-					result = true;
-				}
-			}
-		} catch (error) {
-			keepAlive.stop();
-			if (!(error instanceof DOMException && error.name === 'AbortError')) {
-				// Wasn't aborted (by keepAlive)
-				throw error;
-			}
-		}
-		return result;
-	};
-	fn.abort = () => abort.abort();
-
-	return fn;
-}
-
-const polling = new Longpoller({
-	betweenMs: 50,
-	backoffMs: 10000,
-	schedule: (fetchPoll, delayMs, core) => setTimeout(fetchPoll, delayMs, core),
-	prepareMessageFetch,
-	pollFailed: () => void (connectStatus = STATUS_FAILED),
-	clearTimer,
-	stopKeepAlive,
-});
-
-// --- BEGIN Context Provider/Hook
-
+// The high-level connection CONNECTS when `referenceCount`
+// goes ABOVE ZERO. It DISCONNECTS when it drops to ZERO.
+// (see setupMessageConnection)
+//
+// The count is INCREMENTED every time `useMessages` is
+// invoked. The count is DECREMENTED every time
+// disposeMessages is invoked (in the onCleanup of the component)
+//
 const [referenceCount, references] = makeCount();
 const disposeMessages = references.decrement;
 
-const isActive = () => streamer.active || polling.active;
+// Is one of the low-level connections managing messages right now?
+const isActive = () => streamer.active; /*|| polling.active */
+
+// Both disconnect and connect delegate to the currently
+// selected low-level connection method
 
 function disconnect() {
+	console.log('DISCONNECT');
 	if (streamer.active) streamer.disconnect();
-	else polling.disconnect();
+	// else polling.disconnect();
 }
 
 function connect(basepath: string) {
+	console.log(referenceCount());
 	if (referenceCount() < 1) return;
 
-	if (connectStatus !== STATUS_LONG_POLL)
-		streamer.connect(toHref(basepath, lastEventId));
-	else polling.connect(basepath);
+	if (connectStatus !== STATUS_LONG_POLL) {
+		streamer.connect(hrefToMessages(basepath, lastEventId));
+	}
+	//else polling.connect(basepath);
 }
 
+// Bind module global high-level connection `start` function
+// and hook into the reference count
+// to start/stop the message connection
+// based on the reference count to this module
+//
 function setupMessageConnection(basepath: string) {
+	// populate module global `start` function
 	start = () => {
+		console.log('START');
 		disconnect();
 		connect(basepath);
 	};
 
 	createEffect(() => {
 		const count = referenceCount();
-
-		if (count < 1) {
-			if (isActive()) {
-				disconnect();
-			}
-			return;
-		}
-
-		if (count > 0) {
-			if (isActive()) return;
-
-			start();
-			return;
+		const active = isActive();
+		console.log('COUNT', count, active);
+		if (isActive()) {
+			if (count < 1) disconnect();
+		} else {
+			if (count > 0) start();
 		}
 	});
 }
 
 function MessageProvider(props: ParentProps) {
+	/*
 	if (isServer) {
 		const message = serverSideLoad();
 		if (message) history.reset(message);
 	} else {
 		const stream = server$(connectServerSource);
 		setupMessageConnection(stream.url);
+	}
+	*/
+	if (!isServer) {
+		setupMessageConnection(basepathToMessages());
 	}
 
 	return (

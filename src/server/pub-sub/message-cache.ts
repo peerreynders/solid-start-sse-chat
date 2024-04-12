@@ -1,6 +1,37 @@
 // file: src/server/pub-sub/message-cache.ts
-
 import type { ChatMessage } from '~/lib/chat';
+
+// This MessageCache simply stores all the
+// ChatMessages passed to it with `cache`.
+// It stores them in blocks of `maxMessages`
+// Internally `buffer` holds filled blocks
+// while `latest` is being filled with the
+// most recent arrivals.
+// Once `latest` is filled to capacity it's
+// pushed onto `buffer`.
+//
+// So inherently each block including `latest`
+// contain their oldest entry at index `0`
+// their most recent entry at `length - 1`,
+// while `buffer` has the oldest block at
+// index 0 and it's most recent block at
+// `buffer.length - 1` with `last` being
+// the most recent block of items.
+//
+// `sliceAfter(timestamp)` needs to return
+// a single contiguous array with all the items
+// that are more recent than (excluding) `timestamp`
+// with the most recent at index 0 and the oldest
+// at `length - 1`
+
+// `lastFirstWhile` is a helper function that
+// navigates through `last` and `buffer` in
+// the most recent to oldest item order.
+// On each item the callback
+// `fn(message: ChatMessage, i:number) => boolean`
+// is called to pass the current message
+// in the sequence. It terminates before the
+// end when `fn` returns `false`
 
 function lastFirstWhile(
 	latest: readonly ChatMessage[],
