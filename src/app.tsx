@@ -2,7 +2,7 @@ import { MetaProvider, Title } from '@solidjs/meta';
 import { Router } from '@solidjs/router';
 import { FileRoutes } from '@solidjs/start/router';
 import { Suspense } from 'solid-js';
-import { MessageProvider } from './components/message-context';
+import { HistoryProvider } from './components/history-context';
 
 export default function App() {
 	return (
@@ -10,9 +10,9 @@ export default function App() {
 			root={(props) => (
 				<MetaProvider>
 					<Title>SolidStart - SSE Chat</Title>
-					<MessageProvider>
+					<HistoryProvider>
 						<Suspense>{props.children}</Suspense>
-					</MessageProvider>
+					</HistoryProvider>
 				</MetaProvider>
 			)}
 		>

@@ -3,7 +3,7 @@ import {
 	makeEventStream,
 	type SourceController,
 } from '../../server/event-stream';
-import { subscribe } from '../../server/pub-sub';
+import { subscribe } from '../../server/sub';
 
 import type { APIEvent } from '@solidjs/start/server';
 

@@ -1,8 +1,9 @@
 // file: src/routes/index.tsx
-import { onCleanup, createEffect } from 'solid-js';
-import { useSubmission } from '@solidjs/router';
-import { sendMessage } from '../api';
-import { disposeMessages, useMessages } from '../components/message-context';
+import { createEffect, For, onCleanup } from 'solid-js';
+import { createAsync, createAsyncStore, useSubmission } from '@solidjs/router';
+import { formatUTCTimeOnly } from '~/lib/shame';
+import { broadcast } from '../api';
+import { disposeHistory, useHistory } from '../components/history-context';
 
 const MESSAGE_ERROR =
 	'At least one non-whitespace character is required to send';
@@ -22,11 +23,17 @@ function onMessageInput(event: Event) {
 }
 
 export default function Home() {
-	const messages = useMessages();
-	console.log(messages);
-	onCleanup(disposeMessages);
+	const history = useHistory();
+	const clientId = createAsync(history.clientId, { deferStream: true });
+	const messages = createAsyncStore(history.messages, {
+		deferStream: true,
+		initialValue: [],
+		reconcile: { key: 'timestamp', merge: true },
+	});
+	console.log(messages());
+	onCleanup(disposeHistory);
 
-	const isSending = useSubmission(sendMessage);
+	const isSending = useSubmission(broadcast);
 	createEffect(() => {
 		if (isSending.result !== false) return;
 
@@ -51,9 +58,9 @@ export default function Home() {
 				to learn how to build SolidStart apps.
 			</header>
 			<main class="messages">
-				<h1>Client: ???</h1>
+				<h1>Client: {clientId() ?? '???'}</h1>
 				<form
-					action={sendMessage}
+					action={broadcast}
 					method="post"
 					ref={formRef}
 					onSubmit={clearAfterSubmit}
@@ -74,7 +81,20 @@ export default function Home() {
 						Send
 					</button>
 				</form>
-				<ul role="list"></ul>
+				<ul role="list">
+					<For each={messages()}>
+						{({ timestamp, from, body }) => {
+							const chatTime = formatUTCTimeOnly(timestamp);
+							return (
+								<li>
+									<time datetime={chatTime}>{chatTime}</time>
+									<span class="message__from">{from}</span>
+									{body}
+								</li>
+							);
+						}}
+					</For>
+				</ul>
 			</main>
 		</>
 	);

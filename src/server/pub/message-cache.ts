@@ -1,4 +1,4 @@
-// file: src/server/pub-sub/message-cache.ts
+// file: src/server/pub/message-cache.ts
 import type { ChatMessage } from '~/lib/chat';
 
 // This MessageCache simply stores all the

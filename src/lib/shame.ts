@@ -24,4 +24,8 @@ const utcTimeOnly = new Intl.DateTimeFormat([], {
 });
 const formatUTCTimeOnly = utcTimeOnly.format;
 
-export { formatUTCTimeOnly, isTimeValue };
+const msSinceStart = () => Math.trunc(performance.now());
+
+const epochTimestamp = Date.now;
+
+export { epochTimestamp, formatUTCTimeOnly, isTimeValue, MIN_TIMEVALUE, msSinceStart };

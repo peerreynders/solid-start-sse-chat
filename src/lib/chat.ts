@@ -18,14 +18,17 @@ export type ChatMessage = {
 // https://www.typescriptlang.org/docs/handbook/2/narrowing.html#discriminated-unions
 
 // - `timestamp` is the most recent timestamp within messages
+// only custom Chat messages (the first one to a
+// recently connected subscriber) have a (client) `id`
 export type Chat = {
 	kind: 'chat';
+	id?: string;
 	timestamp: number;
 	messages: ChatMessage[];
 };
 
 // - `id` is the `clientId` assigned by the server
-export type Welcome = Omit<Chat, 'kind'> & {
+export type Welcome = Omit<Chat, 'kind' | 'id'> & {
 	kind: 'welcome';
 	id: string;
 };
@@ -38,28 +41,6 @@ export type KeepAlive = {
 };
 
 export type Message = Chat | Welcome | KeepAlive;
-
-const makeChat = (messages: ChatMessage[], timestamp: number): Chat => ({
-	kind: 'chat',
-	timestamp,
-	messages,
-});
-
-const makeWelcome = (
-	clientId: string,
-	messages: ChatMessage[],
-	timestamp: number
-): Welcome => ({
-	kind: 'welcome',
-	timestamp,
-	id: clientId,
-	messages,
-});
-
-const makeKeepAlive = (timestamp: number): KeepAlive => ({
-	kind: 'keep-alive',
-	timestamp,
-});
 
 const isObjectLike = (data: unknown): data is Record<string, unknown> =>
 	typeof data === 'object' && data !== null;
@@ -97,4 +78,4 @@ function fromJson(raw: string) {
 	return isMessage(message) ? message : undefined;
 }
 
-export { fromJson, makeChat, makeKeepAlive, makeWelcome };
+export { fromJson };
