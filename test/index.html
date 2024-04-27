@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <link rel="shortcut icon" type="image/ico" href="/src/assets/favicon.ico" />
+    <title>uvub Test Playground</title>
+  </head>
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+
+    <uvub-report></uvub-report>
+    <template id="uvub-report-suite">
+      <tr>
+        <th></th>
+        <td class="js-uvb-report-test-count">( / )</td>
+        <td class="js-uvb-report-test-indicator"></td>
+      </tr>
+    </template>
+    <template id="uvub-report-failure">
+      <tbody>
+        <tr>
+          <th></th>
+        </tr>
+        <tr>
+          <td class="uvb-report-fail-message">
+            <span class="uvb-report-operator"></span>
+          </td>
+        </tr>
+      </tbody>
+    </template>
+		<template id="uvub-report-error">
+			<tr>
+    		<td class="uvb-report-error-stack">
+      		<pre></pre>
+     		</td>
+   		</tr>
+		</template>
+    <template id="uvub-report-summary">
+      <table>
+        <tbody>
+          <tr>
+            <th id="total">Total</th>
+            <td class="js-uvb-report-total" headers="total"></td>
+          </tr>
+          <tr>
+            <th id="passed">Passed</th>
+            <td class="js-uvb-report-passed" headers="passed"></td>
+          </tr>
+          <tr>
+            <th id="skipped">Skipped</th>
+            <td class="js-uvb-report-skipped" headers="skipped"></td>
+          </tr>
+          <tr>
+            <th id="duration">Duration</th>
+            <td class="js-uvb-report-duration" headers="duration"></td>
+          </tr>
+        </tbody>
+      </table>
+    </template>
+
+    <script src="/src/index.tsx" type="module"></script>
+  </body>
+</html>

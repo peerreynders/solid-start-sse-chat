@@ -13,11 +13,6 @@ type Core = {
 
 const READY_STATE_CLOSED = 2;
 
-// Symbol used as an obfuscated property on
-// Streamer class in lieu of using # for real
-// private property (casual, rather than enforced privacy)
-const _core = Symbol('Streamer');
-
 // Constructor argument
 // The "Link" between the data/eventId consumer and
 //	the Streamer instance managing the event source object
@@ -47,13 +42,22 @@ type Link = Pick<Core, 'beforeDisconnect' | 'afterConnect'> & {
 // 	and discards the event source after first calling `beforeDisconnect`
 // - `connect()` creates EventSource with the specified `href` and
 // 	add itself as an event Listener before calling `afterConnect`
-// - `active()` is `true` if this instance is managing an
+// - `isActive()` is `true` if this instance is managing an
 // 	EventSource right now; i.e. is after a `connect()` but before
 // 	a disconnect.
-
 class Streamer implements EventListenerObject {
-	readonly [_core]: Core;
+	// This is the only property/method required by
+	// EventListenerObject
 	readonly handleEvent: (event: Event) => void;
+
+	// Implemented as properties rather than methods
+	// so we can pass around the functions without
+	// giving access to the whole object
+
+	readonly connect: (href: string) => void;
+	readonly disconnect: () => void;
+	readonly isActive: () => boolean;
+
 	constructor(link: Link) {
 		const core: Core = {
 			source: undefined,
@@ -64,13 +68,13 @@ class Streamer implements EventListenerObject {
 
 		this.handleEvent = (event: Event) => {
 			if (event.type === 'message' && event instanceof MessageEvent) {
-				this[_core].waiting = false;
+				core.waiting = false;
 				link.handleMessageData(event.data, event.lastEventId);
 				return;
 			}
 
 			if (event.type === 'error') {
-				const { source, waiting } = this[_core];
+				const { source, waiting } = core;
 				// No way to identify the reason here so try long polling next
 				if (source?.readyState === READY_STATE_CLOSED && waiting) {
 					this.disconnect();
@@ -81,32 +85,26 @@ class Streamer implements EventListenerObject {
 			}
 		};
 
-		this[_core] = core;
-	}
+		this.connect = (href: string) => {
+			core.source = new EventSource(href);
+			core.waiting = true;
+			core.source.addEventListener('error', this);
+			core.source.addEventListener('message', this);
+			core.afterConnect();
+		};
 
-	// Needs to be safe to call at any time
-	disconnect() {
-		const core = this[_core];
-		if (core.source === undefined) return;
+		// Needs to be safe to call at any time
+		this.disconnect = () => {
+			if (core.source === undefined) return;
 
-		core.beforeDisconnect();
-		core.source.removeEventListener('message', this);
-		core.source.removeEventListener('error', this);
-		core.source.close();
-		core.source = undefined;
-	}
+			core.beforeDisconnect();
+			core.source.removeEventListener('message', this);
+			core.source.removeEventListener('error', this);
+			core.source.close();
+			core.source = undefined;
+		};
 
-	connect(href: string) {
-		const core = this[_core];
-		core.source = new EventSource(href);
-		core.waiting = true;
-		core.source.addEventListener('error', this);
-		core.source.addEventListener('message', this);
-		core.afterConnect();
-	}
-
-	get active() {
-		return this[_core].source !== undefined;
+		this.isActive = () => core.source !== undefined;
 	}
 }
 

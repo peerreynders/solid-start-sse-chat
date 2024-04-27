@@ -28,4 +28,10 @@ const msSinceStart = () => Math.trunc(performance.now());
 
 const epochTimestamp = Date.now;
 
-export { epochTimestamp, formatUTCTimeOnly, isTimeValue, MIN_TIMEVALUE, msSinceStart };
+export {
+	epochTimestamp,
+	formatUTCTimeOnly,
+	isTimeValue,
+	MIN_TIMEVALUE,
+	msSinceStart,
+};

@@ -1,7 +1,8 @@
 // file: src/server/pub/index.ts
 import { getRequestEvent } from 'solid-js/web';
 import { makeChat, makeClientReply, type ChatMessage } from '../chat';
-import { epochTimestamp, PUB_SUB_LINK, type PubBound } from '../pub-sub';
+import { PUB_SUB_LINK, type PubBound } from '../pub-sub';
+import { epochTimestamp } from '../../lib/shame';
 import { MessageCache } from './message-cache';
 
 const messageCache = new MessageCache();

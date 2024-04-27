@@ -35,6 +35,9 @@ export type Link = Pick<
 >;
 
 class DeadmanTimer {
+	// Implemented as properties rather than methods
+	// so we can pass around the functions without
+	// giving access to the whole object
 	readonly start: () => void;
 	readonly stop: () => void;
 
