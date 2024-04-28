@@ -5,7 +5,7 @@
 import { isServer, getRequestEvent } from 'solid-js/web';
 
 import type { Context } from 'solid-js';
-import type { HistoryReturn } from './types';
+import type { HistoryAccess } from './types';
 
 // 1. Add symbol key
 const keyHistoryStore = Symbol('history-store');
@@ -15,10 +15,10 @@ export type AppStore = {
 	[keyHistoryStore]: {
 		props:
 			| {
-					context: Context<HistoryReturn[0]>;
+					context: Context<HistoryAccess>;
 					incrementCount: () => void;
 					decrementCount: () => void;
-					historyAccess: HistoryReturn[0];
+					historyAccess: HistoryAccess;
 			  }
 			| undefined;
 	};

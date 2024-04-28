@@ -1,11 +1,8 @@
 // file: src/components/message-context/message-history.ts
-import { cache, revalidate } from '@solidjs/router';
-import { MIN_TIMEVALUE } from '~/lib/shame';
+import { MIN_TIMEVALUE } from '../../lib/shame';
 
 import type { ChatMessage, Welcome } from '../../lib/chat';
-
-const NAME_HISTORY = 'message-history';
-const NAME_CLIENT_ID = 'client-id';
+import type { History } from '../../types';
 
 // The MessageHistory class manages two
 // alternating buffers in `pool`.
@@ -67,100 +64,38 @@ class MessageHistory {
 	}
 }
 
-type History = Array<ChatMessage>;
+type HistoryState = {
+	id: string | undefined;
+	history: MessageHistory;
+	reset: (message: Welcome) => void;
+	shunt: (recent: History | ChatMessage) => void;
+};
 
-type HistoryReturn = [
-	{
-		messages: () => Promise<History>;
-		clientId: () => Promise<string | undefined>;
-	},
-	{
-		reset: (message: Welcome) => void;
-		shunt: (recent: ChatMessage[] | ChatMessage) => void;
-	},
-];
-
-// makes a `[store, mutators]` pair for the message history
-// The store exposes the client ID `id` and an array of messages
-// in `history` to be used by the UI.
-//
-// The `reset` mutator sets the client ID and message history
-// from the `Welcome` message.
-// The history is ignored `welcome.timestamp === MIN_TIMEVALUE`
-//
-// The `shunt` mutator add the messages at the head of the
-// history array.
-function makeHistoryCSR(): HistoryReturn {
+export function makeHistoryState(
+	revalidateClientId: () => void,
+	revalidateHistory: () => void
+) {
 	// Backing state for the reactive store
 	// Note how both `reset` and `shunt` revalidate
 	// to get the `cache` to update its
 	// dependents
 	//
-	const state: {
-		id: string | undefined;
-		history: MessageHistory;
-		reset: (message: Welcome) => void;
-		shunt: (recent: ChatMessage[] | ChatMessage) => void;
-	} = {
+	const state: HistoryState = {
 		id: undefined,
 		history: new MessageHistory(),
-		reset: (welcome: Welcome) => {
+		reset: (welcome) => {
 			state.id = welcome.id;
-			revalidate(NAME_CLIENT_ID, true);
+			revalidateClientId();
 			if (welcome.timestamp > MIN_TIMEVALUE) {
 				state.history.reset(welcome.messages);
-				revalidate(NAME_HISTORY, true);
+				revalidateHistory();
 			}
 		},
 		shunt: (recent) => {
 			state.history.shunt(recent);
-			revalidate(NAME_HISTORY, true);
+			revalidateHistory();
 		},
 	};
 
-	// Create a `cache` to attach a
-	// `createAsyncStore` to
-	const getMessages = cache(() => {
-		console.log('getMessages', Date.now());
-		return Promise.resolve(state.history.value);
-	}, NAME_HISTORY);
-
-	// Create a `cache` to attach a
-	// `createAsync` to
-	const getClientId = cache(() => {
-		console.log('getClientId', Date.now());
-		return Promise.resolve(state.id);
-	}, NAME_CLIENT_ID);
-
-	return [
-		{
-			messages: () => getMessages(),
-			clientId: () => getClientId(),
-		},
-		{
-			reset: state.reset,
-			shunt: state.shunt,
-		},
-	];
+	return state;
 }
-
-// The SSR version is only loaded once from the initial
-// welcome message. The mutators are no-ops.
-function makeHistorySSR(welcome: Promise<Welcome>): HistoryReturn {
-	const idFrom = (welcome: Welcome) => welcome.id;
-	const messagesFrom = (welcome: Welcome) => welcome.messages;
-
-	return [
-		{
-			messages: () => welcome.then(messagesFrom),
-			clientId: () => welcome.then(idFrom),
-		},
-		{
-			reset: (_welcome) => void 0,
-			shunt: (_recent) => void 0,
-		},
-	];
-}
-
-export const makeHistory = (welcome?: Promise<Welcome>) =>
-	welcome ? makeHistorySSR(welcome) : makeHistoryCSR();

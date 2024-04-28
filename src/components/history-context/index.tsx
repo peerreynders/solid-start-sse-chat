@@ -1,11 +1,13 @@
 // file: src/components/message-context/index.ts
 import {
+	batch,
 	createContext,
 	createEffect,
 	useContext,
 	type ParentProps,
 } from 'solid-js';
 import { isServer } from 'solid-js/web';
+import { cache, revalidate } from '@solidjs/router';
 import { basepathToMessages } from '../../route-path';
 import {
 	MESSAGES_LAST_EVENT_ID,
@@ -14,14 +16,16 @@ import {
 } from '../../api';
 import { getHistoryStore } from '~/app-store';
 
-import { makeHistory } from './message-history';
+import { makeHistoryState } from './message-history';
 import { makeCount } from './reference-count';
 import { DeadmanTimer, type ActionId } from './deadman-timer';
-import { fromJson, type Message } from '../../lib/chat';
+import { fromJson } from '../../lib/chat';
 import { MIN_TIMEVALUE, msSinceStart } from '../../lib/shame';
 import { Streamer } from './streamer';
 import { Longpoller } from './longpoller';
 
+import type { ChatMessage, Message, Welcome } from '../../lib/chat';
+import type { History, HistoryAccess } from '../../types';
 // import { scheduleCompare } from '~/lib/row-monitor';
 
 //  0 - No connection attempted
@@ -165,6 +169,57 @@ function setupSSE(
 	});
 }
 
+const NAME_HISTORY = 'message-history';
+const NAME_CLIENT_ID = 'client-id';
+
+// makes a `[store, mutators]` pair for the message history
+// The store exposes the client ID `id` and an array of messages
+// in `history` to be used by the UI.
+//
+// The `reset` mutator sets the client ID and message history
+// from the `Welcome` message.
+// The history is ignored `welcome.timestamp === MIN_TIMEVALUE`
+//
+// The `shunt` mutator add the messages at the head of the
+// history array.
+function makeHistory(): [
+	HistoryAccess,
+	{
+		reset: (message: Welcome) => void;
+		shunt: (recent: History | ChatMessage) => void;
+	},
+] {
+	const state = makeHistoryState(
+		() => revalidate(NAME_CLIENT_ID, true),
+		() => revalidate(NAME_HISTORY, true)
+	);
+
+	// Create a `cache` to attach a
+	// `createAsyncStore` to
+	const getMessages = cache(() => {
+		console.log('getMessages', Date.now());
+		return Promise.resolve(state.history.value);
+	}, NAME_HISTORY);
+
+	// Create a `cache` to attach a
+	// `createAsync` to
+	const getClientId = cache(() => {
+		console.log('getClientId', Date.now());
+		return Promise.resolve(state.id);
+	}, NAME_CLIENT_ID);
+
+	return [
+		{
+			messages: () => getMessages(),
+			clientId: () => getClientId(),
+		},
+		{
+			reset: (message) => batch(() => state.reset(message)),
+			shunt: state.shunt,
+		},
+	];
+}
+
 function initializeCSR() {
 	const [historyAccess, history] = makeHistory();
 	const context = createContext(historyAccess);
@@ -304,9 +359,15 @@ function initializeCSR() {
 } // end function initializeCSR
 
 function initializeSSR() {
-	const noOp = () => void 0;
-	const [historyAccess] = makeHistory(welcomeSSR());
+	// The SSR version is only loaded once from the initial
+	// welcome message.
+	const p = welcomeSSR();
+	const historyAccess = {
+		clientId: () => p.then((welcome): string | undefined => welcome.id),
+		messages: () => p.then((welcome) => welcome.messages),
+	};
 	const context = createContext(historyAccess);
+	const noOp = () => void 0;
 
 	return {
 		context,
