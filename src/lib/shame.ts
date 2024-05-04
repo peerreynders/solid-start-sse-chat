@@ -32,6 +32,7 @@ export {
 	epochTimestamp,
 	formatUTCTimeOnly,
 	isTimeValue,
+	MAX_TIMEVALUE,
 	MIN_TIMEVALUE,
 	msSinceStart,
 };

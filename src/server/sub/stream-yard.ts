@@ -19,14 +19,14 @@ type Core = {
 // 		(need keep alive messages)
 // messageSent: sent message to at least one registered receiver
 // 		(reset keep alive timer)
-const STREAMER_CHANGE = {
+const STREAM_YARD_CHANGE = {
 	idle: 0,
 	running: 1,
 	messageSent: 2,
 } as const;
 
 // 0 | 1 | 2
-type ChangeKind = (typeof STREAMER_CHANGE)[keyof typeof STREAMER_CHANGE];
+type ChangeKind = (typeof STREAM_YARD_CHANGE)[keyof typeof STREAM_YARD_CHANGE];
 
 // Symbol used as an obfuscated property on
 // Streamer class in lieu of using # for real
@@ -44,7 +44,7 @@ export type Link = Pick<Core, 'onChange'>;
 // - sendInitialMessage;
 // - onChange:
 //
-class Streamer {
+class StreamYard {
 	[_core]: Core;
 
 	constructor(link: Link) {
@@ -54,14 +54,14 @@ class Streamer {
 		};
 	}
 
-	// The `STREAMER_CHANGE.running`
+	// The `STREAM_YARD_CHANGE.running`
 	// `onChange` notification
 	// is invoked if there were
 	// no `receivers` before the new
 	// `receiver` was added.
 	add(send: Receiver['send'], id: string) {
 		const core = this[_core];
-		console.log('Streamer add', id);
+		console.log('StreamYard add', id);
 
 		const receiver: Receiver = {
 			send,
@@ -70,12 +70,12 @@ class Streamer {
 
 		const lastSize = core.receivers.size;
 		core.receivers.set(id, receiver);
-		if (lastSize < 1 && core.onChange) core.onChange(STREAMER_CHANGE.running);
+		if (lastSize < 1 && core.onChange) core.onChange(STREAM_YARD_CHANGE.running);
 	}
 
 	// sends the data with the provided event ID
 	// to all the currently registered `receivers`
-	// The `STREAMER_CHANGE.messageSent`
+	// The `STREAM_YARD_CHANGE.messageSent`
 	// `onChange` notification
 	// is only invoked if at least one receiver
 	// was set the message.
@@ -84,13 +84,13 @@ class Streamer {
 	// rather than a method
 	send = (data: string, eventId?: string) => {
 		const core = this[_core];
-		console.log('streamer send', data, eventId, core.receivers.size);
+		console.log('StreamYard send', data, eventId, core.receivers.size);
 		if (core.receivers.size < 1) return;
 
 		for (const rec of core.receivers.values()) {
 			rec.send(data, eventId);
 		}
-		if (core.onChange) core.onChange(STREAMER_CHANGE.messageSent);
+		if (core.onChange) core.onChange(STREAM_YARD_CHANGE.messageSent);
 	};
 
 	// `unsubscribe` drops the specified
@@ -111,9 +111,9 @@ class Streamer {
 		const result = core.receivers.delete(id);
 		if (!result) return false;
 
-		if (lastSize === 1 && core.onChange) core.onChange(STREAMER_CHANGE.idle);
+		if (lastSize === 1 && core.onChange) core.onChange(STREAM_YARD_CHANGE.idle);
 		return true;
 	}
 }
 
-export { Streamer, STREAMER_CHANGE };
+export { StreamYard, STREAM_YARD_CHANGE };

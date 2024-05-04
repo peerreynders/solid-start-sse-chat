@@ -39,7 +39,7 @@ const connectStatus = {
 	IDLE: 0,
 	WAITING: 1,
 	MESSAGE: 2,
-	LONG_POLL: 3,
+	LONGPOLL: 3,
 } as const;
 
 type ConnectStatus = (typeof connectStatus)[keyof typeof connectStatus];
@@ -151,7 +151,7 @@ function setupSSE(
 			timeout.start();
 		},
 		streamFailed: () => {
-			setStatus(connectStatus.LONG_POLL);
+			setStatus(connectStatus.LONGPOLL);
 			console.log('streamFailed');
 			setTimeout(start);
 		},
@@ -225,7 +225,8 @@ function initializeCSR() {
 	const context = createContext(historyAccess);
 
 	// --- BEGIN  high-level connection (general)
-	let status: ConnectStatus = connectStatus.IDLE;
+	// let status: ConnectStatus = connectStatus.IDLE;
+	let status: ConnectStatus = connectStatus.LONGPOLL;
 	const setStatus = (value: ConnectStatus) => (status = value);
 
 	let lastId: string | undefined;
@@ -294,7 +295,7 @@ function initializeCSR() {
 
 	const connectCore = {
 		connect: () => {
-			if (streamer && status !== connectStatus.LONG_POLL) {
+			if (streamer && status !== connectStatus.LONGPOLL) {
 				streamer.connect(hrefToMessages(basepathToMessages(), lastEventId()));
 				return;
 			}

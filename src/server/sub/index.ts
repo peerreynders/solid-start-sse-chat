@@ -1,6 +1,6 @@
 // file: src/server/sub/index.ts
 import { nanoid } from 'nanoid';
-import { epochTimestamp, isTimeValue, MIN_TIMEVALUE } from '../../lib/shame';
+import { epochTimestamp, isTimeValue, msSinceStart, MIN_TIMEVALUE } from '../../lib/shame';
 import {
 	makeClientReply,
 	makeClientRequest,
@@ -9,10 +9,13 @@ import {
 	type Welcome,
 } from '../chat';
 import { PUB_SUB_LINK, type SubBound } from '../pub-sub';
-import { Streamer, STREAMER_CHANGE } from './streamer';
+import { StreamYard, STREAM_YARD_CHANGE } from './stream-yard';
+import { PollYard } from './poll-yard';
+import { MessageRing } from './message-ring';
 import { IdleAction } from './idle-action';
 
 import type { SourceController } from '../event-stream';
+import type { PollController } from '../event-poll';
 
 const SUB_KIND = {
 	stream: 0,
@@ -34,11 +37,16 @@ type PendingStream = PendingCore & {
 	controller: SourceController;
 };
 
+type PendingLongpoll = PendingCore & {
+	kind: typeof SUB_KIND.longpoll;
+	controller: PollController;
+};
+
 type PendingSSR = PendingCore & {
 	kind: typeof SUB_KIND.ssr;
 };
 
-type Pending = PendingStream | PendingSSR;
+type Pending = PendingStream | PendingLongpoll | PendingSSR;
 
 const KEEP_ALIVE_MS = 15000; // 15 seconds
 const REPLY_TIMEOUT_MS = 1500; // 1.5 seconds
@@ -51,8 +59,6 @@ function timeFromLastEventId(lastEventId: string | undefined) {
 const toEventId = (timestamp: number) => String(timestamp);
 const forwardMessage = (message: Message, send: SourceController['send']) =>
 	send(JSON.stringify(message), toEventId(message.timestamp));
-
-const msSinceStart = () => Math.trunc(performance.now());
 
 const pending = new Map<string, Pending>();
 const channel = new BroadcastChannel(PUB_SUB_LINK);
@@ -116,7 +122,7 @@ function takePending(takeId: string) {
 
 // --- keep alive messages (for event streams)
 const dispatchKeepAlive = (): void =>
-	forwardMessage(makeKeepAlive(epochTimestamp()), streamer.send);
+	forwardMessage(makeKeepAlive(epochTimestamp()), streamYard.send);
 
 const idleAction = new IdleAction({
 	maxIdleMs: KEEP_ALIVE_MS,
@@ -130,22 +136,92 @@ const idleAction = new IdleAction({
 // that use an event stream after the have
 // received a welcome message
 //
-const streamer = new Streamer({
+const streamYard = new StreamYard({
 	onChange: (kind) => {
 		switch (kind) {
-			case STREAMER_CHANGE.messageSent:
+			case STREAM_YARD_CHANGE.messageSent:
 				return idleAction.markAction();
 
-			case STREAMER_CHANGE.running:
+			case STREAM_YARD_CHANGE.running:
 				return idleAction.start();
 
-			case STREAMER_CHANGE.idle:
+			case STREAM_YARD_CHANGE.idle:
 				return idleAction.stop();
 		}
 	},
 });
 
+const LONGPOLL_MIN_WAIT = 2000;
+
+const pollYard = new PollYard<ReturnType<typeof setTimeout>>({
+	maxMs: KEEP_ALIVE_MS,
+	minMs: LONGPOLL_MIN_WAIT, 
+	clearTimer: clearTimeout,
+	setTimer: setTimeout,
+	timeMs: msSinceStart,
+});
+
+const ring = new MessageRing(KEEP_ALIVE_MS * 2);
+
+function sendClientRequest(itemId: string, lastTime?: number) {
+	const message = makeClientRequest(itemId, lastTime);
+	console.log('SUB: PubBound', message);
+	channel.postMessage(message);
+}
+
 // --- exports
+function longpoll(
+	controller: PollController,
+	args: { clientId: string; lastEventId: string | undefined }
+) {
+	// Longpoll goes straight to the pollYard if the buffered messages
+	// are enough for a Chat
+	const lastTime = timeFromLastEventId(args.lastEventId);
+	const count = lastTime === undefined ? -1 : ring.countAfter(epochTimestamp(),lastTime, LONGPOLL_MIN_WAIT);
+	if (count > -1 && lastTime) {
+		// Serve longpoll with pollYard for `keepAlive` or `Chat`
+		// One browser can connect with multiple tabs so give each
+		// a separate id (clientId only identified the browser)
+		const id = nanoid();
+		const close = () => {
+			const message = ring.toMessage(epochTimestamp(), args.clientId, lastTime);
+			controller.close(JSON.stringify(message));
+			console.log('pollyard close', message, id);
+		};
+		pollYard.add(close, id, count);
+
+		return function unsubscribe() {
+			pollYard.unsubscribe(id);
+			console.log('POLL(yard) unsubscribe', args.clientId, id);
+			// Note: controller.close() is calling this so don't call it again
+		};
+	}
+
+	// Serve longpoll via pending queue for `Welcome`
+	const item = {
+		kind: SUB_KIND.longpoll,
+		id: nanoid(),
+		clientId: args.clientId,
+		controller,
+		expire: REPLY_TIMEOUT_MS + msSinceStart(),
+		send: (message: SubBound) => {
+			item.controller.close(JSON.stringify(message));
+			console.log('pending close', message);
+		},
+	} as const;
+
+	pending.set(item.id, item);
+	scheduleTimeout();
+	sendClientRequest(item.id, lastTime);
+
+	return function unsubscribe() {
+		// Check Pending
+		const pendingItem = takePending(item.id);
+		console.log('POLL(pending) unsubscribe', item.id, item.clientId, pendingItem);
+		// Note: controller.close() is calling this so don't call it again
+	};
+}
+
 function subscribe(
 	controller: SourceController,
 	args: { clientId: string; lastEventId: string | undefined }
@@ -154,6 +230,7 @@ function subscribe(
 	// to support multiple connections
 	// from the same browser
 	// which would share the same `clientId`
+	const lastTime = timeFromLastEventId(args.lastEventId);
 	const item = {
 		kind: SUB_KIND.stream,
 		id: nanoid(),
@@ -165,24 +242,18 @@ function subscribe(
 			console.log('send', message);
 
 			// Now just stream messages as they come in
-			streamer.add(item.controller.send, item.id);
+			streamYard.add(item.controller.send, item.id);
 		},
 	} as const;
 	pending.set(item.id, item);
 	scheduleTimeout();
-
-	const message = makeClientRequest(
-		item.id,
-		timeFromLastEventId(args.lastEventId)
-	);
-	console.log('SUB: PubBound', message);
-	channel.postMessage(message);
+	sendClientRequest(item.id, lastTime);
 
 	return function unsubscribe() {
 		// Check Pending
 		const pendingItem = takePending(item.id);
 		console.log('SUB unsubscribe', item.id, item.clientId, pendingItem);
-		if (!pendingItem) streamer.unsubscribe(item.id);
+		if (!pendingItem) streamYard.unsubscribe(item.id);
 		// Note: controller.close() is calling this so don't call it again
 	};
 }
@@ -204,10 +275,7 @@ function makeServerWelcome(clientId: string) {
 		console.log('makeServerWelcome');
 		pending.set(item.id, item);
 		scheduleTimeout();
-
-		const message = makeClientRequest(item.id);
-		console.log('SUB: PubBound(1)', message);
-		channel.postMessage(message);
+		sendClientRequest(item.id);
 	});
 }
 
@@ -222,14 +290,17 @@ function receive(event: MessageEvent<SubBound>) {
 			message.id = item.clientId;
 			item.send(message);
 		}
-	} else if (message.kind === 'chat') {
-		// forward to streaming responsesit
-		forwardMessage(message, streamer.send);
 
-		// TODO forward to longpolling
+	} else if (message.kind === 'chat') {
+		ring.push(epochTimestamp(), message);
+		// forward to streaming responses
+		forwardMessage(message, streamYard.send);
+
+		// Notify polls that messages have arrived
+		pollYard.mark(message.messages.length);
 	}
 }
 
 channel.addEventListener('message', receive);
 
-export { makeServerWelcome, subscribe };
+export { longpoll, makeServerWelcome, subscribe };
