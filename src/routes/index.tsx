@@ -1,48 +1,9 @@
-// file src/routes/index.tsx
-
-import { onCleanup, For } from 'solid-js';
-import { FormError } from 'solid-start';
+// file: src/routes/index.tsx
+import { createEffect, For, onCleanup } from 'solid-js';
+import { createAsync, createAsyncStore, useSubmission } from '@solidjs/router';
 import { formatUTCTimeOnly } from '~/lib/shame';
-import { disposeMessages, useMessages } from '~/components/message-context';
-
-// --- BEGIN server side ---
-import {
-	createServerAction$,
-	ServerError,
-	type ServerFunctionEvent,
-} from 'solid-start/server';
-
-import { fromFetchEventClientId, send } from '~/server/pub-sub';
-
-async function sendFn(form: FormData, event: ServerFunctionEvent) {
-	const messageData = form.get('message');
-	const message = typeof messageData === 'string' ? messageData : undefined;
-
-	if (!message) {
-		const options = {
-			fields: {
-				message: messageData,
-			},
-			fieldErrors: {
-				message: 'Invalid Message',
-			},
-		};
-
-		throw new FormError(options.fieldErrors.message, options);
-	}
-
-	const clientId = fromFetchEventClientId(event);
-	if (!clientId) return new ServerError('Missing Client ID', { status: 400 });
-
-	send(message, clientId);
-}
-
-// --- END server side ---
-
-function showClientId(messages: ReturnType<typeof useMessages>) {
-	const id = messages.id;
-	return typeof id === 'string' ? id : '???';
-}
+import { broadcast } from '../api';
+import { disposeHistory, useHistory } from '../components/history-context';
 
 const MESSAGE_ERROR =
 	'At least one non-whitespace character is required to send';
@@ -62,17 +23,28 @@ function onMessageInput(event: Event) {
 }
 
 export default function Home() {
-	const messages = useMessages();
-	onCleanup(disposeMessages);
-	const [sending, sendMessage] = createServerAction$(sendFn);
+	const history = useHistory();
+	const clientId = createAsync(history.clientId, { deferStream: true });
+	const messages = createAsyncStore(history.messages, {
+		deferStream: true,
+		initialValue: [],
+		reconcile: { key: 'timestamp', merge: true },
+	});
+	onCleanup(disposeHistory);
 
-	let $form: HTMLFormElement | undefined;
-	const clearFormTask = () => $form?.reset();
+	const isSending = useSubmission(broadcast);
+	createEffect(() => {
+		if (isSending.result !== false) return;
+
+		console.error('sendMessage failed!');
+	});
+
+	let formRef: HTMLFormElement | undefined;
+	const clearFormTask = () => formRef?.reset();
 	const clearAfterSubmit = (event: SubmitEvent) => {
-		if (event.currentTarget !== $form) return;
+		if (event.currentTarget !== formRef) return;
 
-		setTimeout(clearFormTask);
-		event.stopPropagation();
+		requestAnimationFrame(clearFormTask);
 	};
 
 	return (
@@ -85,8 +57,13 @@ export default function Home() {
 				to learn how to build SolidStart apps.
 			</header>
 			<main class="messages">
-				<h1>Client: {showClientId(messages)}</h1>
-				<sendMessage.Form ref={$form} onsubmit={clearAfterSubmit}>
+				<h1>Client: {clientId() ?? '???'}</h1>
+				<form
+					action={broadcast}
+					method="post"
+					ref={formRef}
+					onSubmit={clearAfterSubmit}
+				>
 					<label>
 						Message:
 						<input
@@ -94,17 +71,17 @@ export default function Home() {
 							name="message"
 							required
 							pattern="^.*\S.*$"
-							oninput={onMessageInput}
-							oninvalid={onMessageInvalid}
+							onInvalid={onMessageInvalid}
+							onInput={onMessageInput}
 							title={MESSAGE_ERROR}
 						/>
 					</label>
-					<button type="submit" disabled={sending.pending}>
+					<button type="submit" disabled={isSending.pending}>
 						Send
 					</button>
-				</sendMessage.Form>
+				</form>
 				<ul role="list">
-					<For each={messages.history}>
+					<For each={messages()}>
 						{({ timestamp, from, body }) => {
 							const chatTime = formatUTCTimeOnly(timestamp);
 							return (

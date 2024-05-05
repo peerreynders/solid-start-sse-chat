@@ -5,9 +5,15 @@ dist
 .vercel
 .netlify
 netlify
+.vinxi
+
+# Environment
+.env
+.env*.local
 
 # dependencies
 /node_modules
+/test/node_modules
 
 # IDEs and editors
 /.idea

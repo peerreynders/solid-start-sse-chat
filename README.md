@@ -1,5 +1,8 @@
 # SolidStart SSE Chat
-Basic Chat demonstration with [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) (SSE) for server to client communication. (Uses [this workaround](https://github.com/peerreynders/solid-start-sse-counter) so that the Node.js server can detect when the client closes the SSE request.)
+
+**Updated** for [SolidStart v1.0.0-rc.0](https://github.com/solidjs/solid-start/releases/tag/v1.0.0-rc.0) 
+
+Basic Chat demonstration with [server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events) (SSE) for server to client communication. 
 
 If HTTP/1.1 compatibility is desired a client application shouldn't use more that one SSE connection as there is a limit of 6 connections per domain on a browser (the limit is significantly higher with HTTP/2). Typically SSE is less resource intensive compared to [WebSockets](https://datatracker.ietf.org/doc/html/rfc6455) (which aren't part of the HTTP spec either). 
 
@@ -11,112 +14,68 @@ For [EventSource](https://developer.mozilla.org/en-US/docs/Web/API/EventSource)s
 
 From that perspective it's likely a mistake to create an `EventSource` inside an ordinary component as it may be construed from [the remix-utils `useEventSource()` example](https://github.com/remix-run/examples/blob/c59ee8eb2b06002b22d53e91df48a0b77b49091c/sse-counter/app/root.tsx) (the example *does* actually only use it in the top-level `App` component though that detail is easily missed.).
 
-Here the `EventSource` is centrally handled in [`message-context`](./src/components/message-context.tsx) where the messages are processed into a [store](https://www.solidjs.com/docs/latest/api#using-stores) which itself is made accessible via a [context](https://www.solidjs.com/docs/latest/api#createcontext) to the rest of the application.
+Here the `EventSource` is centrally handled in [`history-context`](./src/components/history-context/index.tsx) where the messages are staged and expose via [`cache`](https://docs.solidjs.com/solid-router/reference/data-apis/cache) async access points which are made accessible via a [context](https://docs.solidjs.com/reference/component-apis/create-context) to the rest of the application. A [component](./src/routes/index.tsx) can then use [`createAsync`](https://docs.solidjs.com/solid-router/reference/data-apis/create-async) (or in this case `createAsyncStore`) to get reactive access to the messages.
 
-Ideally in a larger application with multiple server-to-client information streams, the streams should be multiplexed onto a single SSE connection and demultiplexed client-side into the appropriate parts of client state. 
+Ideally in a larger application with multiple server-to-client information streams, the streams should be multiplexed onto a single SSE connection and demultiplexed client-side into the appropriate parts of client state.
 
 ```shell
-$ cd solid-start-sse-chat
-$ npm i
+cd solid-start-sse-chat
 
-added 480 packages, and audited 481 packages in 4s
+pnpm install
 
-$ npm run dev
+    Lockfile is up to date, resolution step is skipped
+    Packages: +572
+    +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+    Progress: resolved 572, reused 572, downloaded 0, added 572, done
 
-> solid-start-sse-chat@0.0.0 dev
-> solid-start dev
+    dependencies:
+    + @solidjs/meta 0.29.3
+    + @solidjs/router 0.13.2
+    + @solidjs/start 1.0.0-rc.0
+    + nanoid 5.0.7
+    + solid-js 1.8.17
+    + vinxi 0.3.11
 
- solid-start dev 
- version  0.2.26
- adapter  node
+    devDependencies:
+    + @typescript-eslint/eslint-plugin 7.8.0
+    + @typescript-eslint/parser 7.8.0
+    + eslint 8.57.0
+    + eslint-config-prettier 9.1.0
+    + prettier 3.2.5
+    + typescript 5.4.5
 
-  VITE v4.3.9  ready in 564 ms
+    Done in 1.7s
 
-  ➜  Local:   http://localhost:3000/
-  ➜  Network: use --host to expose
-  ➜  Inspect: http://localhost:3000/__inspect/
-  ➜  press h to show help
+cp .env.example .env
 
-  ➜  Page Routes:
-     ┌─ http://localhost:3000/*404
-     └─ http://localhost:3000/
+pnpm run dev
 
-  ➜  API Routes:
-     None! 👻
+    > solid-start-sse-chat@0.0.0 dev
+    > vinxi dev
 
-  > Server modules: 
-   http://localhost:3000/_m/*
+    vinxi v0.3.11
+    vinxi starting dev server
 
-GET http://localhost:3000/
-GET http://localhost:3000/_m/src/components/message-context.tsx/0/stream
-POST http://localhost:3000/_m/src/routes/index.tsx/0/sending
+        ➜ Local:    http://localhost:3000/
+        ➜ Network:  use --host to expose
 ```
 
-```
-$ npm run build
+---
 
-> solid-start-sse-chat@0.0.0 build
-> solid-start build
+## Notes
 
- solid-start build 
- version  0.2.26
- adapter  node
-
-solid-start building client...
-vite v4.3.9 building for production...
-✓ 64 modules transformed.
-
-dist/public/manifest.json                     0.62 kB │ gzip:  0.22 kB
-dist/public/ssr-manifest.json                 2.10 kB │ gzip:  0.50 kB
-dist/public/assets/_...404_-50f74a48.js       0.55 kB │ gzip:  0.37 kB
-dist/public/assets/index-371eb851.js          5.34 kB │ gzip:  2.44 kB
-dist/public/assets/entry-client-e4e12076.js  49.64 kB │ gzip: 19.05 kB
-✓ built in 1.40s
-solid-start client built in: 1.422s
-
-solid-start building server...
-vite v4.3.9 building SSR bundle for production...
-✓ 62 modules transformed.
-
-.solid/server/manifest.json     0.12 kB
-.solid/server/entry-server.js  89.36 kB
-✓ built in 811ms
-solid-start server built in: 836.949ms
-
-
-> solid-start-sse-chat@0.0.0 postbuild
-> sed -i 's/assets_handler).use(comp/assets_handler).use(solidStartSseSupport).use(comp/g' dist/server.js
-
-$ npm run start
-
-> solid-start-sse-chat@0.0.0 start
-> solid-start start
-
- solid-start start 
- version  0.2.26
- adapter  node
-
-
-  ➜  Page Routes:
-     ┌─ http://localhost:3000/*404
-     └─ http://localhost:3000/
-
-  ➜  API Routes:
-     None! 👻
-
-Listening on port 3000
-```
-
---- 
-
-To force the application to use the [long polling](https://javascript.info/long-polling#long-polling) fallback [instead of SSE](./src/components/message-context.tsx):
+- To force the application to use the [long polling](https://javascript.info/long-polling#long-polling) fallback [instead of SSE](./src/components/history-context/index.tsx):
 
 ```TypeScript
-// file: src/components/message-context
+// file: src/components/history-context/index.tsx
 // …
 
-// Use `if(info.streamed === undefined) {` to force error to switch to long polling fallback
-if (info.streamed) {
+// To start with long polling, set to: connectStatus.LONGPOLL;
+let status: ConnectStatus = connectStatus.IDLE;
 
 // …
 ```
+
+- The messages streamed **to the browser** are handled via the [`/api/messages`](./src/routes/api/messages.ts) API route. Messages sent **to the server** are handled with the [`broadcast`](./src/api.ts) [server](https://docs.solidjs.com/solid-start/reference/server/use-server) [action](https://docs.solidjs.com/solid-router/reference/data-apis/action). Server functions and route handling seem to operate in isolated memory spaces on the server. This lead to [`BroadcastChannel`](https://developer.mozilla.org/en-US/docs/Web/API/Broadcast_Channel_API) being used for communication between the [`pub`](./src/server/pub/index.ts)lish and [`sub`](./src/server/sub/index.ts)scription portion of the server logic. 
+
+- Concurrent (SSR) requests share the same memory space and thereby JS modules and their globals. This made it necessary to isolate the context values used during SSR in [`app-store`](./src/app-store.ts). 
