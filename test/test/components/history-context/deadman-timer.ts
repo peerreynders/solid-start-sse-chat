@@ -6,7 +6,7 @@ import {
 	type Link,
 } from '../../../../src/components/history-context/deadman-timer';
 
-type TimerId = ReturnType<typeof setTimeout>;
+type TimerId = number; // In the browser setTimeout returns a number
 
 function makeLinkHolder(time = 0) {
 	const holder: {
@@ -17,7 +17,7 @@ function makeLinkHolder(time = 0) {
 		count: 0;
 		onKeepAlive: (() => void) | undefined;
 		runKeepAlive: () => void;
-		link: Link;
+		link: Link<TimerId>;
 	} = {
 		time,
 		nextTimerId: 9999999,

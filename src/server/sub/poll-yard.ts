@@ -7,7 +7,7 @@ type Poll = {
 };
 
 type Core<T> = {
-	polls: Map<string,Poll>;
+	polls: Map<string, Poll>;
 	timer: T | undefined;
 	nextSweep: number;
 	maxMs: number;
@@ -16,7 +16,7 @@ type Core<T> = {
 	setTimer: (cb: (c: Core<T>) => void, delay: number, c: Core<T>) => T;
 	timeMs: () => number;
 	stop: () => void;
-}
+};
 
 const pollRespondBy = <T>(core: Core<T>, poll: Poll) =>
 	poll.arrived + (poll.count < 1 ? core.maxMs : core.minMs);
@@ -33,7 +33,7 @@ function scheduleSweep<T>(core: Core<T>) {
 	// Looking for the most urgent `respondBy`
 	for (result = polls.next(); !(result?.done ?? false); result = polls.next()) {
 		const p = result.value;
-		// If poll arrived after current `respondBy` 
+		// If poll arrived after current `respondBy`
 		// no need to look any further
 		if (p.arrived > respondBy) break;
 
@@ -53,7 +53,7 @@ function scheduleSweep<T>(core: Core<T>) {
 }
 
 function sweep<T>(core: Core<T>) {
-	// Invoked via setTimeout only 
+	// Invoked via setTimeout only
 	// so no need to clearTimer
 	core.timer = undefined;
 	core.nextSweep = 0;
@@ -74,19 +74,15 @@ function sweep<T>(core: Core<T>) {
 
 type Link<T> = Pick<
 	Core<T>,
-	| 'minMs'
-	| 'maxMs'
-	| 'clearTimer'
-	| 'setTimer'
-	| 'timeMs'
->; 
+	'minMs' | 'maxMs' | 'clearTimer' | 'setTimer' | 'timeMs'
+>;
 
 class PollYard<T> {
-  readonly add: (close: () => void, id: string,  messageCount: number) => void;
+	readonly add: (close: () => void, id: string, messageCount: number) => void;
 	readonly mark: (messageCount: number) => void;
 	readonly unsubscribe: (id: string) => boolean;
 
-	constructor({ maxMs, minMs, clearTimer, setTimer, timeMs } : Link<T>) {
+	constructor({ maxMs, minMs, clearTimer, setTimer, timeMs }: Link<T>) {
 		const core: Core<T> = {
 			polls: new Map(),
 			timer: undefined,
@@ -102,7 +98,7 @@ class PollYard<T> {
 				core.clearTimer(core.timer);
 				core.timer = undefined;
 				core.nextSweep = 0;
-			}
+			},
 		};
 
 		this.add = (close, id, count) => {
@@ -110,16 +106,16 @@ class PollYard<T> {
 				close,
 				id,
 				count,
-				arrived: core.timeMs()
+				arrived: core.timeMs(),
 			};
 			core.polls.set(poll.id, poll);
 
-			scheduleSweep(core)
-		}
+			scheduleSweep(core);
+		};
 
 		this.mark = (messageCount) => {
 			const now = core.timeMs();
-			// release all polls that were waiting 
+			// release all polls that were waiting
 			// for a message and have passed the
 			// minimum wait.
 			for (const poll of core.polls.values()) {
@@ -131,19 +127,18 @@ class PollYard<T> {
 			}
 
 			scheduleSweep(core);
-		}
+		};
 
 		this.unsubscribe = (id: string) => {
-			console.log('PollYard unsubscribe', id, core.polls.size);
 			const lastSize = core.polls.size;
 			const result = core.polls.delete(id);
 			if (!result) return false;
 
-		 	if (lastSize === 1) core.stop()
-		 	else scheduleSweep(core);
+			if (lastSize === 1) core.stop();
+			else scheduleSweep(core);
 
 			return true;
-		}
+		};
 	}
 }
 

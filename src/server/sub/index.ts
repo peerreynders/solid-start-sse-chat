@@ -1,14 +1,20 @@
 // file: src/server/sub/index.ts
 import { nanoid } from 'nanoid';
-import { epochTimestamp, isTimeValue, msSinceStart, MIN_TIMEVALUE } from '../../lib/shame';
 import {
-	makeClientReply,
+	epochTimestamp,
+	isTimeValue,
+	msSinceStart,
+	MIN_TIMEVALUE,
+} from '../../lib/shame';
+import {
 	makeClientRequest,
 	makeKeepAlive,
+	makeWelcome,
 	type Message,
 	type Welcome,
 } from '../chat';
 import { PUB_SUB_LINK, type SubBound } from '../pub-sub';
+import { WelcomeYard, type Pending } from './welcome-yard';
 import { StreamYard, STREAM_YARD_CHANGE } from './stream-yard';
 import { PollYard } from './poll-yard';
 import { MessageRing } from './message-ring';
@@ -22,34 +28,76 @@ const SUB_KIND = {
 	longpoll: 1,
 	ssr: 2,
 } as const;
-// type SubKind = (typeof SUB_KIND)[keyof typeof SUB_KIND];
 
-type Send = (welcome: SubBound) => void;
-type PendingCore = {
-	id: string;
+type SubscriberCore = {
 	clientId: string;
-	expire: number;
-	send: Send;
 };
 
-type PendingStream = PendingCore & {
+type SubscriberStream = SubscriberCore & {
 	kind: typeof SUB_KIND.stream;
 	controller: SourceController;
 };
 
-type PendingLongpoll = PendingCore & {
+type SubscriberPoll = SubscriberCore & {
 	kind: typeof SUB_KIND.longpoll;
 	controller: PollController;
 };
 
-type PendingSSR = PendingCore & {
+type SubscriberSSR = SubscriberCore & {
 	kind: typeof SUB_KIND.ssr;
 };
 
-type Pending = PendingStream | PendingLongpoll | PendingSSR;
+// type Subscriber =
+//	| SubscriberStream
+//	| SubscriberPoll
+//	| SubscriberSSR;
 
 const KEEP_ALIVE_MS = 15000; // 15 seconds
 const REPLY_TIMEOUT_MS = 1500; // 1.5 seconds
+const LONGPOLL_MIN_WAIT = 2000; // 2 secs
+
+function clientIdFromData(data: unknown) {
+	const clientId =
+		data && typeof data === 'object' && 'clientId' in data
+			? data.clientId
+			: undefined;
+	if (typeof clientId !== 'string')
+		throw new Error('Missing property "clientId"');
+	return clientId;
+}
+
+// The welcomeYard holds subscribers waiting
+// for the `pub` area to respond
+// to their subscription (ID) specific request
+// for an intial history of
+// messages-the `Welcome` message
+//
+// Past that point fresh messages coming from `pub`
+// are distributed to SSE streams via the streamYard while
+// longpoll subscriptions are served by the pollYard where
+// messages to be included are aggregated by the
+// messageRing which maintains a buffer of messages
+// that cover twice the keep alive interval.
+//
+const welcomeYard = new WelcomeYard({
+	makeTimedout: (item: Pending<unknown>) =>
+		makeWelcome([], MIN_TIMEVALUE, clientIdFromData(item.data)),
+	clearTimer: clearTimeout,
+	setTimer: setTimeout,
+	timeMs: msSinceStart,
+});
+
+const expireForStream = (now: number) => REPLY_TIMEOUT_MS + now;
+let pubActive = false;
+// For longpoll wait the full keep alive interval
+// if `pub` hasn't responded yet
+const expireForPoll = (now: number) =>
+	pubActive ? REPLY_TIMEOUT_MS + now : KEEP_ALIVE_MS + now;
+// For SSR don't hang around if `pub` hasn't responded yet
+const expireForServer = (now: number) =>
+	pubActive ? REPLY_TIMEOUT_MS + now : 300 + now;
+
+// ---
 
 function timeFromLastEventId(lastEventId: string | undefined) {
 	const lastId = Number(lastEventId);
@@ -60,67 +108,10 @@ const toEventId = (timestamp: number) => String(timestamp);
 const forwardMessage = (message: Message, send: SourceController['send']) =>
 	send(JSON.stringify(message), toEventId(message.timestamp));
 
-const pending = new Map<string, Pending>();
 const channel = new BroadcastChannel(PUB_SUB_LINK);
 
-// --- reply time out
-
-// Need to time out if `src/server/pub.ts` doesn't reply
-let timeoutId: ReturnType<typeof setTimeout> | undefined; // Hold the requests that are waiting for a reply
-
-// Note: Expiry Scheduling is assumed to follow order
-// of scheduling; items scheduled later
-// are assumed to expire later.
-function scheduleTimeout(delay = REPLY_TIMEOUT_MS) {
-	if (timeoutId) return;
-	timeoutId = setTimeout(replyTimeout, delay);
-}
-
-// Note: this is entirely synchronous
-function replyTimeout() {
-	const replyTo = [];
-	let last: Pending | undefined;
-
-	// We don't bother clearing timeouts
-	// instead we may find there is just nothing to do
-
-	// values() iterates in insertion order
-	// i.e. oldest first
-	for (const item of pending.values()) {
-		const now = msSinceStart();
-		if (now < item.expire) {
-			last = item;
-			break;
-		}
-
-		replyTo.push(item);
-		pending.delete(item.id);
-	}
-
-	timeoutId = undefined;
-	// There are still items waiting for a reply
-	if (last) scheduleTimeout(last.expire - msSinceStart());
-
-	// No need to be (a)waiting around
-	// Just send an empty chat reply
-	for (let i = 0; i < replyTo.length; i += 1)
-		replyTo[i].send(makeClientReply([], MIN_TIMEVALUE, replyTo[i].clientId));
-}
-
-// --- pending management
-
-// Takes item off the pending map
-// - Doesn't worry about clearing timeout
-function takePending(takeId: string) {
-	const item = pending.get(takeId);
-	if (!item) return undefined;
-
-	const r = pending.delete(takeId);
-	console.log('take', takeId, r);
-	return item;
-}
-
 // --- keep alive messages (for event streams)
+
 const dispatchKeepAlive = (): void =>
 	forwardMessage(makeKeepAlive(epochTimestamp()), streamYard.send);
 
@@ -132,8 +123,8 @@ const idleAction = new IdleAction({
 	idleAction: dispatchKeepAlive,
 });
 
-// `streamer` manages all the client connections
-// that use an event stream after the have
+// `streamYard` manages all the subscriber connections
+// that use an event stream after they have
 // received a welcome message
 //
 const streamYard = new StreamYard({
@@ -151,11 +142,14 @@ const streamYard = new StreamYard({
 	},
 });
 
-const LONGPOLL_MIN_WAIT = 2000;
-
+// `pollYard` manages all the subscriber connections
+// that use longpolling requests.
+// Requests that can't be covered within the messageRing's
+// buffer are handled via the welcomeYard instead.
+//
 const pollYard = new PollYard<ReturnType<typeof setTimeout>>({
 	maxMs: KEEP_ALIVE_MS,
-	minMs: LONGPOLL_MIN_WAIT, 
+	minMs: LONGPOLL_MIN_WAIT,
 	clearTimer: clearTimeout,
 	setTimer: setTimeout,
 	timeMs: msSinceStart,
@@ -165,11 +159,11 @@ const ring = new MessageRing(KEEP_ALIVE_MS * 2);
 
 function sendClientRequest(itemId: string, lastTime?: number) {
 	const message = makeClientRequest(itemId, lastTime);
-	console.log('SUB: PubBound', message);
 	channel.postMessage(message);
 }
 
 // --- exports
+
 function longpoll(
 	controller: PollController,
 	args: { clientId: string; lastEventId: string | undefined }
@@ -177,47 +171,47 @@ function longpoll(
 	// Longpoll goes straight to the pollYard if the buffered messages
 	// are enough for a Chat
 	const lastTime = timeFromLastEventId(args.lastEventId);
-	const count = lastTime === undefined ? -1 : ring.countAfter(epochTimestamp(),lastTime, LONGPOLL_MIN_WAIT);
+	const count =
+		lastTime === undefined
+			? -1
+			: ring.countAfter(epochTimestamp(), lastTime, LONGPOLL_MIN_WAIT);
 	if (count > -1 && lastTime) {
-		// Serve longpoll with pollYard for `keepAlive` or `Chat`
+		// Serve longpoll with pollYard for `KeepAlive` or `Chat` messages
 		// One browser can connect with multiple tabs so give each
-		// a separate id (clientId only identified the browser)
+		// a separate subscription ID (clientId only identifies the browser)
 		const id = nanoid();
 		const close = () => {
 			const message = ring.toMessage(epochTimestamp(), args.clientId, lastTime);
 			controller.close(JSON.stringify(message));
-			console.log('pollyard close', message, id);
 		};
 		pollYard.add(close, id, count);
 
 		return function unsubscribe() {
 			pollYard.unsubscribe(id);
-			console.log('POLL(yard) unsubscribe', args.clientId, id);
 			// Note: controller.close() is calling this so don't call it again
 		};
 	}
 
-	// Serve longpoll via pending queue for `Welcome`
-	const item = {
-		kind: SUB_KIND.longpoll,
+	// Serve longpoll via welcomeYard instead
+	const item: Pending<SubscriberPoll> = {
 		id: nanoid(),
-		clientId: args.clientId,
-		controller,
-		expire: REPLY_TIMEOUT_MS + msSinceStart(),
-		send: (message: SubBound) => {
-			item.controller.close(JSON.stringify(message));
-			console.log('pending close', message);
+		expire: expireForPoll(msSinceStart()),
+		send: (message) => {
+			item.data.controller.close(JSON.stringify(message));
 		},
-	} as const;
+		data: {
+			kind: SUB_KIND.longpoll,
+			clientId: args.clientId,
+			controller,
+		},
+	};
 
-	pending.set(item.id, item);
-	scheduleTimeout();
+	welcomeYard.add(item);
 	sendClientRequest(item.id, lastTime);
 
 	return function unsubscribe() {
 		// Check Pending
-		const pendingItem = takePending(item.id);
-		console.log('POLL(pending) unsubscribe', item.id, item.clientId, pendingItem);
+		welcomeYard.take(item.id);
 		// Note: controller.close() is calling this so don't call it again
 	};
 }
@@ -231,28 +225,26 @@ function subscribe(
 	// from the same browser
 	// which would share the same `clientId`
 	const lastTime = timeFromLastEventId(args.lastEventId);
-	const item = {
-		kind: SUB_KIND.stream,
+	const item: Pending<SubscriberStream> = {
 		id: nanoid(),
-		clientId: args.clientId,
-		controller,
-		expire: REPLY_TIMEOUT_MS + msSinceStart(),
-		send: (message: SubBound) => {
-			forwardMessage(message, item.controller.send);
-			console.log('send', message);
-
+		expire: expireForStream(msSinceStart()),
+		send: (message) => {
+			forwardMessage(message, item.data.controller.send);
 			// Now just stream messages as they come in
-			streamYard.add(item.controller.send, item.id);
+			streamYard.add(item.data.controller.send, item.id);
 		},
-	} as const;
-	pending.set(item.id, item);
-	scheduleTimeout();
+		data: {
+			kind: SUB_KIND.stream,
+			clientId: args.clientId,
+			controller,
+		},
+	};
+	welcomeYard.add(item);
 	sendClientRequest(item.id, lastTime);
 
 	return function unsubscribe() {
 		// Check Pending
-		const pendingItem = takePending(item.id);
-		console.log('SUB unsubscribe', item.id, item.clientId, pendingItem);
+		const pendingItem = welcomeYard.take(item.id);
 		if (!pendingItem) streamYard.unsubscribe(item.id);
 		// Note: controller.close() is calling this so don't call it again
 	};
@@ -260,21 +252,20 @@ function subscribe(
 
 function makeServerWelcome(clientId: string) {
 	return new Promise<Welcome>((resolve, reject) => {
-		const item = {
-			kind: SUB_KIND.ssr,
+		const item: Pending<SubscriberSSR> = {
 			id: nanoid(),
-			clientId,
-			expire: REPLY_TIMEOUT_MS + msSinceStart(),
+			expire: expireForServer(msSinceStart()),
 			send: (message: SubBound) => {
-				console.log('send(1)', message);
 				if (message.kind === 'welcome') resolve(message);
 				else
 					reject(new Error(`Expected Welcome message; got (${message.kind})`));
 			},
-		} as const;
-		console.log('makeServerWelcome');
-		pending.set(item.id, item);
-		scheduleTimeout();
+			data: {
+				kind: SUB_KIND.ssr,
+				clientId,
+			},
+		};
+		welcomeYard.add(item);
 		sendClientRequest(item.id);
 	});
 }
@@ -282,15 +273,15 @@ function makeServerWelcome(clientId: string) {
 // --- receiving pub message events
 function receive(event: MessageEvent<SubBound>) {
 	const message = event.data;
+	pubActive = true;
 	if (typeof message.id === 'string') {
-		const item = takePending(message.id);
+		const item = welcomeYard.take(message.id);
 		if (item) {
 			// Replace internal subscription ID
 			// with clientId before dispatch
-			message.id = item.clientId;
+			message.id = clientIdFromData(item.data);
 			item.send(message);
 		}
-
 	} else if (message.kind === 'chat') {
 		ring.push(epochTimestamp(), message);
 		// forward to streaming responses

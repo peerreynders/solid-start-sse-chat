@@ -12,7 +12,6 @@ async function attachAppStore(event: FetchEvent) {
 		? record.clientId
 		: await refreshClientId(event);
 	event.locals.appStore = makeAppStore();
-	console.log('MW', event.locals.clientId);
 }
 
 export default createMiddleware({

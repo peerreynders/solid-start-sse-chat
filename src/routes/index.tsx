@@ -30,7 +30,6 @@ export default function Home() {
 		initialValue: [],
 		reconcile: { key: 'timestamp', merge: true },
 	});
-	console.log(messages());
 	onCleanup(disposeHistory);
 
 	const isSending = useSubmission(broadcast);

@@ -18,7 +18,7 @@ import { getHistoryStore } from '~/app-store';
 
 import { makeHistoryState } from './message-history';
 import { makeCount } from './reference-count';
-import { DeadmanTimer, type ActionId } from './deadman-timer';
+import { DeadmanTimer } from './deadman-timer';
 import { fromJson } from '../../lib/chat';
 import { MIN_TIMEVALUE, msSinceStart } from '../../lib/shame';
 import { Streamer } from './streamer';
@@ -105,7 +105,7 @@ function setupLongpoll(
 		return fn;
 	};
 
-	return new Longpoller({
+	return new Longpoller<ReturnType<typeof setTimeout>>({
 		betweenMs: 50,
 		backoffMs: 10000,
 		schedule: (fetchPoll, delayMs, core) =>
@@ -147,20 +147,16 @@ function setupSSE(
 		beforeDisconnect: timeout.stop,
 		afterConnect: () => {
 			setStatus(connectStatus.WAITING);
-			console.log('afterConnect');
 			timeout.start();
 		},
 		streamFailed: () => {
 			setStatus(connectStatus.LONGPOLL);
-			console.log('streamFailed');
 			setTimeout(start);
 		},
 		handleMessageData: (data, eventId) => {
-			console.log('data', data, eventId);
 			timeout.start();
 
 			const message = fromJson(data);
-			console.log('message', message);
 			if (!message) return;
 
 			setStatus(connectStatus.MESSAGE);
@@ -197,14 +193,12 @@ function makeHistory(): [
 	// Create a `cache` to attach a
 	// `createAsyncStore` to
 	const getMessages = cache(() => {
-		console.log('getMessages', Date.now());
 		return Promise.resolve(state.history.value);
 	}, NAME_HISTORY);
 
 	// Create a `cache` to attach a
 	// `createAsync` to
 	const getClientId = cache(() => {
-		console.log('getClientId', Date.now());
 		return Promise.resolve(state.id);
 	}, NAME_CLIENT_ID);
 
@@ -225,8 +219,8 @@ function initializeCSR() {
 	const context = createContext(historyAccess);
 
 	// --- BEGIN  high-level connection (general)
-	// let status: ConnectStatus = connectStatus.IDLE;
-	let status: ConnectStatus = connectStatus.LONGPOLL;
+	// To start with long polling, set to: connectStatus.LONGPOLL;
+	let status: ConnectStatus = connectStatus.IDLE;
 	const setStatus = (value: ConnectStatus) => (status = value);
 
 	let lastId: string | undefined;
@@ -236,22 +230,22 @@ function initializeCSR() {
 	// - keepAlive action
 	// - to `try again` with long polling after SSE connection failed
 	// - when the `useMessage` reference count increases from 0.
+	/* eslint prefer-const: ["error", { ignoreReadBeforeAssign: true }] */
 	let connect: (() => void) | undefined;
 	let disconnect: (() => void) | undefined;
 	const cycleConnection = () => {
-		console.log('CYCLE');
 		disconnect?.();
 		connect?.();
 	};
 
 	// Cycle the connection if there is no traffic
 	// for `actionMs`
-	const countdown = new DeadmanTimer({
+	const countdown = new DeadmanTimer<ReturnType<typeof setTimeout>>({
 		actionMs: 20000, // 20 secs
 		action: cycleConnection,
 		timeMs: msSinceStart,
 		schedule: (action, delay, core) => setTimeout(action, delay, core),
-		clearTimer: (id: ActionId) => clearTimeout(id),
+		clearTimer: (id) => clearTimeout(id),
 	});
 
 	// The `update` handler processes the
@@ -259,20 +253,17 @@ function initializeCSR() {
 	// to initialize the message history and
 	// adding the most recent messages.
 	const update = (message: Message, eventId?: string) => {
-		console.log(message, eventId);
 		if (eventId) lastId = eventId;
 		switch (message.kind) {
 			case 'chat': {
 				if (message.timestamp > MIN_TIMEVALUE) history.shunt(message.messages);
 				// scheduleCompare();
-				console.log('chat', message.timestamp);
 				break;
 			}
 
 			case 'welcome': {
 				history.reset(message);
 				// scheduleCompare();
-				console.log('welcome', message.timestamp);
 				break;
 			}
 
@@ -326,12 +317,10 @@ function initializeCSR() {
 	// Both disconnect and connect delegate to the currently
 	// selected low-level connection method
 	disconnect = () => {
-		console.log('DISCONNECT');
 		connectCore.disconnect();
 	};
 
 	connect = () => {
-		console.log(referenceCount());
 		if (referenceCount() < 1) return;
 
 		connectCore.connect();
@@ -343,7 +332,6 @@ function initializeCSR() {
 	//
 	createEffect(() => {
 		const count = referenceCount();
-		console.log('COUNT', count, connectCore.isActive());
 		if (connectCore.isActive()) {
 			if (count < 1) disconnect();
 		} else {

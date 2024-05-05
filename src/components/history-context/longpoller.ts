@@ -1,7 +1,5 @@
 // file src/components/history-context/longpoller.ts
 
-type TimerId = ReturnType<typeof setTimeout>;
-
 // A prepared fetch will return
 // - `true` if it has received a message payload (perhaps empty)
 // - `false` if the response is not OK (which increments the `abort` count on `Core`)
@@ -15,8 +13,8 @@ type PreparedFetch = {
 
 // aborted: number of consecutive failed fetches
 //   Resets to 0 on the next successful connection
-type Core = {
-	startId: TimerId | undefined;
+type Core<Tid> = {
+	startId: Tid | undefined;
 	aborted: number;
 	prepared: PreparedFetch | undefined;
 	disconnect: () => void;
@@ -24,10 +22,10 @@ type Core = {
 	betweenMs: number;
 	backoffMs: number;
 	schedule: (
-		fetchPoll: (core: Core) => Promise<void>,
+		fetchPoll: (core: Core<Tid>) => Promise<void>,
 		delayMs: number,
-		core: Core
-	) => TimerId;
+		core: Core<Tid>
+	) => Tid;
 	prepareMessageFetch: (path: string) => PreparedFetch;
 	pollFailed: () => void;
 };
@@ -41,7 +39,7 @@ type Core = {
 //   be invoked from the outside
 // On failure it disconnects (cleans up) and notifies
 //   the poll's failure (leading to a higher level connection failure)
-async function fetchByPoll(core: Core) {
+async function fetchByPoll<Tid>(core: Core<Tid>) {
 	console.assert(
 		core.prepared === undefined,
 		'prepared fetch  unexpectedly set (fetchByPoll)'
@@ -70,11 +68,11 @@ async function fetchByPoll(core: Core) {
 	}
 }
 
-export type Link = Pick<
-	Core,
+export type Link<Tid> = Pick<
+	Core<Tid>,
 	'betweenMs' | 'backoffMs' | 'schedule' | 'prepareMessageFetch' | 'pollFailed'
 > & {
-	clearTimer: (id: TimerId) => void;
+	clearTimer: (id: Tid) => void;
 	cancelTimeout: () => void;
 };
 
@@ -85,7 +83,7 @@ export type Link = Pick<
 // The Longpoller is active if either `fetchByPoll` is
 // scheduled or in progress.
 
-class Longpoller {
+class Longpoller<Tid> {
 	// Implemented as properties rather than methods
 	// so we can pass around the functions without
 	// giving access to the whole object
@@ -93,8 +91,8 @@ class Longpoller {
 	readonly disconnect: () => void;
 	readonly isActive: () => boolean;
 
-	constructor(link: Link) {
-		const core: Core = {
+	constructor(link: Link<Tid>) {
+		const core: Core<Tid> = {
 			startId: undefined,
 			aborted: 0,
 			prepared: undefined,

@@ -43,7 +43,6 @@ function listenForRequests() {
 // Cache the message for later
 // Set up the channel it necessary.
 async function broadcast(body: string) {
-	console.log('PUB', body);
 	if (!channel) listenForRequests();
 
 	const event = getRequestEvent();

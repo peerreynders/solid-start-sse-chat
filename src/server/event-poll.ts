@@ -23,8 +23,7 @@ function makeEventPoll(request: IncomingMessage, init: InitSource) {
 
 	return new Promise<string | null>((resolve) => {
 		closePoll = (data?: string) => {
-			if (onClientClose)
-				request.removeListener('close', onClientClose);
+			if (onClientClose) request.removeListener('close', onClientClose);
 
 			onClientClose = undefined;
 			// Call cleanup passed from initilization

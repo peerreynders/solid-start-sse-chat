@@ -2,9 +2,7 @@
 import { suite } from 'uvub';
 import * as assert from 'uvub/assert';
 
-import {
-	PollYard,
-} from '../../../../src/server/sub/poll-yard';
+import { PollYard } from '../../../../src/server/sub/poll-yard';
 
 const suiteRuns: (() => void)[] = [];
 
@@ -26,14 +24,14 @@ function makePoll(id: string) {
 }
 
 // type TimerId = ReturnType<typeof setTimeout>;
-type TimerId = number
+type TimerId = number;
 
 const KEEP_ALIVE_MS = 15000;
 const LONGPOLL_MIN_WAIT = 2000;
 
 type Link = ConstructorParameters<typeof PollYard<TimerId>>[0];
 type SetTimer = Link['setTimer'];
-type TimerTask = Parameters<SetTimer>[0]; 
+type TimerTask = Parameters<SetTimer>[0];
 type Core = Parameters<SetTimer>[2];
 
 function makeLinkHolder(time = 0) {
@@ -47,7 +45,7 @@ function makeLinkHolder(time = 0) {
 		runTask: () => boolean;
 		link: Link;
 	} = {
-		nextTimerId: 9999999,	
+		nextTimerId: 9999999,
 		timerId: undefined,
 		time,
 		nextTime: 0,
@@ -56,7 +54,7 @@ function makeLinkHolder(time = 0) {
 		runTask: () => {
 			if (!holder.fn || !holder.arg) return false;
 
-			if (holder.time < holder.nextTime) return false
+			if (holder.time < holder.nextTime) return false;
 
 			const fn = holder.fn;
 			const arg = holder.arg;
@@ -68,7 +66,7 @@ function makeLinkHolder(time = 0) {
 
 			fn(arg);
 			return true;
-		},		
+		},
 		link: {
 			minMs: LONGPOLL_MIN_WAIT,
 			maxMs: KEEP_ALIVE_MS,
@@ -91,13 +89,12 @@ function makeLinkHolder(time = 0) {
 
 				holder.nextTime = holder.time + delay;
 				holder.timerId = id;
-				holder.fn = fn,
-				holder.arg = core;
+				(holder.fn = fn), (holder.arg = core);
 
 				return id;
-			},	
+			},
 			timeMs: () => holder.time,
-		}
+		},
 	};
 
 	return holder;
@@ -118,7 +115,11 @@ pollYard('1 poll with 1 message close after minMs', () => {
 	holder.runTask();
 
 	// THEN
-	assert.is(poll.closeCount, 1, `Poll wasn't closed after minMs (with at least 1 message)`);
+	assert.is(
+		poll.closeCount,
+		1,
+		`Poll wasn't closed after minMs (with at least 1 message)`
+	);
 });
 
 pollYard('1 poll with no message close after maxMs', () => {
@@ -136,14 +137,13 @@ pollYard('1 poll with no message close after maxMs', () => {
 	// THEN
 	assert.is(poll.closeCount, 0, `Poll was closed before maxMs expired`);
 
-	// WHEN 
+	// WHEN
 	holder.time += 13000;
 	holder.runTask();
 
 	// THEN
 	assert.is(poll.closeCount, 1, `Poll wasn't closed after maxMs (no message)`);
 });
-
 
 pollYard('1 poll with 1 message unsubscribe before minMs', () => {
 	// GIVEN
@@ -160,7 +160,11 @@ pollYard('1 poll with 1 message unsubscribe before minMs', () => {
 	const hasRun = holder.runTask();
 
 	// THEN
-	assert.is(poll.closeCount, 0, `Poll was closed despite unsubscribe before minMs (1 message)`);
+	assert.is(
+		poll.closeCount,
+		0,
+		`Poll was closed despite unsubscribe before minMs (1 message)`
+	);
 	assert.is(hasRun, false, `Unexpected timer task was run`);
 });
 
@@ -179,7 +183,11 @@ pollYard('1 poll with no message, unsubscribe before maxMs', () => {
 	const hasRun = holder.runTask();
 
 	// THEN
-	assert.is(poll.closeCount, 0, `Poll was closed despite unsubscribe before maxMs (1 message)`);
+	assert.is(
+		poll.closeCount,
+		0,
+		`Poll was closed despite unsubscribe before maxMs (1 message)`
+	);
 	assert.is(hasRun, false, `Unexpected timer task was run`);
 });
 
@@ -196,7 +204,7 @@ pollYard('1 poll, no message but mark before minMs', () => {
 	holder.time += 1000;
 	uut.mark(1);
 	let hasRun = holder.runTask();
-	
+
 	// THEN
 	assert.is(poll.closeCount, 0, `Poll was closed before minMs (after mark)`);
 	assert.is(hasRun, false, `Unexpected timer task was run`);
@@ -221,7 +229,7 @@ pollYard('1 poll, no message but mark before maxMs', () => {
 	uut.add(poll.close, poll.id, messageCount);
 	holder.time += 2000;
 	let hasRun = holder.runTask();
-	
+
 	// THEN
 	assert.is(poll.closeCount, 0, `Poll was closed at minMs (before mark)`);
 	assert.is(hasRun, false, `Unexpected timer task was run`);
@@ -261,7 +269,11 @@ pollYard('2 polls, 1 message; close each after minMs', () => {
 	hasRun = holder.runTask();
 
 	// THEN
-	assert.is(pollA.closeCount, 1, `Poll A wasn't closed after minMs (1 message)`);
+	assert.is(
+		pollA.closeCount,
+		1,
+		`Poll A wasn't closed after minMs (1 message)`
+	);
 	assert.is(pollB.closeCount, 0, `Poll B was unexpectedly closed (B)`);
 
 	// WHEN
@@ -269,7 +281,11 @@ pollYard('2 polls, 1 message; close each after minMs', () => {
 	hasRun = holder.runTask();
 
 	assert.is(pollA.closeCount, 1, `Poll A was unexpectedly closed again`);
-	assert.is(pollB.closeCount, 1, `Poll B wasn't closed after minMs (1 message)`);
+	assert.is(
+		pollB.closeCount,
+		1,
+		`Poll B wasn't closed after minMs (1 message)`
+	);
 });
 
 pollYard('2 polls, no message; mark before minMs', () => {
@@ -304,10 +320,14 @@ pollYard('2 polls, no message; mark before minMs', () => {
 
 	// WHEN
 	holder.time += 500;
-	hasRun = holder.runTask()
+	hasRun = holder.runTask();
 
 	// THEN
-	assert.is(pollA.closeCount, 1, `Poll A wasn't closed after minMs (after mark)`);
+	assert.is(
+		pollA.closeCount,
+		1,
+		`Poll A wasn't closed after minMs (after mark)`
+	);
 	assert.is(pollB.closeCount, 0, `Poll B was unexpectedly closed (C)`);
 
 	// WHEN
@@ -315,7 +335,11 @@ pollYard('2 polls, no message; mark before minMs', () => {
 	hasRun = holder.runTask();
 
 	assert.is(pollA.closeCount, 1, `Poll A was unexpectedly closed again`);
-	assert.is(pollB.closeCount, 1, `Poll B wasn't closed after minMs (after mark)`);
+	assert.is(
+		pollB.closeCount,
+		1,
+		`Poll B wasn't closed after minMs (after mark)`
+	);
 });
 
 pollYard('2 polls, close each before maxMs', () => {
@@ -342,7 +366,7 @@ pollYard('2 polls, close each before maxMs', () => {
 
 	// WHEN
 	holder.time += 7000;
-	hasRun = holder.runTask()
+	hasRun = holder.runTask();
 
 	// THEN
 	assert.is(pollA.closeCount, 1, `Poll A wasn't closed after maxMs`);
@@ -379,11 +403,15 @@ pollYard('Later poll with outstanding message closes earlier', () => {
 
 	// WHEN
 	holder.time += 2000;
-	hasRun = holder.runTask()
+	hasRun = holder.runTask();
 
 	// THEN
 	assert.is(pollA.closeCount, 0, `Poll A was unexpectedly closed (A)`);
-	assert.is(pollB.closeCount, 1, `Poll B wasn't closed after minMs (1 message)`);
+	assert.is(
+		pollB.closeCount,
+		1,
+		`Poll B wasn't closed after minMs (1 message)`
+	);
 
 	// WHEN
 	holder.time += 5000;

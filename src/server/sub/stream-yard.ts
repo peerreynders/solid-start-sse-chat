@@ -61,8 +61,6 @@ class StreamYard {
 	// `receiver` was added.
 	add(send: Receiver['send'], id: string) {
 		const core = this[_core];
-		console.log('StreamYard add', id);
-
 		const receiver: Receiver = {
 			send,
 			id,
@@ -70,7 +68,8 @@ class StreamYard {
 
 		const lastSize = core.receivers.size;
 		core.receivers.set(id, receiver);
-		if (lastSize < 1 && core.onChange) core.onChange(STREAM_YARD_CHANGE.running);
+		if (lastSize < 1 && core.onChange)
+			core.onChange(STREAM_YARD_CHANGE.running);
 	}
 
 	// sends the data with the provided event ID
@@ -84,7 +83,6 @@ class StreamYard {
 	// rather than a method
 	send = (data: string, eventId?: string) => {
 		const core = this[_core];
-		console.log('StreamYard send', data, eventId, core.receivers.size);
 		if (core.receivers.size < 1) return;
 
 		for (const rec of core.receivers.values()) {
@@ -106,7 +104,6 @@ class StreamYard {
 	// level.
 	unsubscribe(id: string) {
 		const core = this[_core];
-		console.log('Streamer unsubscribe', id, core.receivers.size);
 		const lastSize = core.receivers.size;
 		const result = core.receivers.delete(id);
 		if (!result) return false;

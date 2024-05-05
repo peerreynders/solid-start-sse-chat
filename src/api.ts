@@ -15,7 +15,6 @@ function welcomeSSR() {
 	if (!event || !event.locals.clientId)
 		throw new Error('No request or clientId');
 
-	console.log('welcomeSSR', event.locals.clientId);
 	return makeServerWelcome(event.locals.clientId);
 }
 

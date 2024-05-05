@@ -1,15 +1,17 @@
 // file: src/components/history-context/deadman-timer.ts
 
-export type ActionId = ReturnType<typeof setTimeout>;
-
-type Core = {
-	actionId: ActionId | undefined;
+type Core<Tid> = {
+	actionId: Tid | undefined;
 	lastTime: number;
 	actionMs: number;
 	action: () => void;
 	timeMs: () => number;
-	schedule: (fn: (core: Core) => void, delayMs: number, core: Core) => ActionId;
-	clearTimer: (id: ActionId) => void;
+	schedule: (
+		fn: (core: Core<Tid>) => void,
+		delayMs: number,
+		core: Core<Tid>
+	) => Tid;
+	clearTimer: (id: Tid) => void;
 };
 
 // This function **will** run
@@ -17,9 +19,8 @@ type Core = {
 // recently enough. If it was the function simply reschedules itself
 // Otherwise it invokes the action and stops
 //
-function keepAlive(core: Core) {
+function keepAlive<Tid>(core: Core<Tid>) {
 	const delay = core.actionMs - (core.timeMs() - core.lastTime);
-	console.log('countdown', delay);
 	if (delay > 0) {
 		core.actionId = core.schedule(keepAlive, delay, core);
 		return;
@@ -29,20 +30,20 @@ function keepAlive(core: Core) {
 	core.action();
 }
 
-export type Link = Pick<
-	Core,
+export type Link<Tid> = Pick<
+	Core<Tid>,
 	'actionMs' | 'action' | 'timeMs' | 'schedule' | 'clearTimer'
 >;
 
-class DeadmanTimer {
+class DeadmanTimer<Tid> {
 	// Implemented as properties rather than methods
 	// so we can pass around the functions without
 	// giving access to the whole object
 	readonly start: () => void;
 	readonly stop: () => void;
 
-	constructor(link: Link) {
-		const core: Core = {
+	constructor(link: Link<Tid>) {
+		const core: Core<Tid> = {
 			actionId: undefined,
 			lastTime: 0,
 			actionMs: link.actionMs,

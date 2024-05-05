@@ -6,7 +6,7 @@ import {
 	type Link,
 } from '../../../../src/components/history-context/longpoller';
 
-type TimerId = ReturnType<typeof setTimeout>;
+type TimerId = number; // In the browser setTimeout returns a number
 
 function withSettle<T extends Error>(value: boolean | T) {
 	let fn: (() => void) | undefined;
@@ -36,8 +36,8 @@ function makeLinkHolder(time = 0) {
 		timerId: TimerId;
 		nextTime: number;
 		delayMs: number;
-		fn: Parameters<Link['schedule']>[0] | undefined;
-		arg: Parameters<Link['schedule']>[2] | undefined;
+		fn: Parameters<Link<TimerId>['schedule']>[0] | undefined;
+		arg: Parameters<Link<TimerId>['schedule']>[2] | undefined;
 		fetchDo: boolean | undefined;
 		fetchHref: string | undefined;
 		fetchSettle: (() => void | Promise<void>) | undefined;
@@ -45,7 +45,7 @@ function makeLinkHolder(time = 0) {
 		failedCount: 0;
 		cancelTimeoutCount: 0;
 		runTask: () => void;
-		link: Link;
+		link: Link<TimerId>;
 	} = {
 		time,
 		nextTimerId: 9999999,
